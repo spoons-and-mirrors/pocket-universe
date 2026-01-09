@@ -1,43 +1,21 @@
 # IAM Plugin for OpenCode
 
-Inter-agent messaging for parallel subagents.
+Lets parallel subagents talk to each other. No configuration needed — just install and it works.
 
-## The `iam` Tool
+## What It Does
 
-| Action | Parameters | Description |
-|--------|------------|-------------|
-| `announce` | `message` | Announce what you're working on |
-| `sessions` | - | List agents and what they're working on |
-| `read` | - | Read your messages (marks as read) |
-| `write` | `to`, `message` | Send a message |
-
-## Examples
-
-```
-iam(action="announce", message="Implementing user authentication")
-iam(action="sessions")
-iam(action="read")
-iam(action="write", to="agentA", message="What approach are you using?")
-```
+When you spawn multiple agents with the `task` tool, they can:
+- **Announce** what they're working on
+- **Discover** other agents and see what they're doing
+- **Message** each other to coordinate work
+- Get **notified** when new messages arrive
 
 ## How It Works
 
-- **In-memory** - fast, no file clutter, resets on restart
-- **Auto-discovery** - agents register on first iam use, see each other immediately
-- **Simple aliases** - agents get friendly names (agentA, agentB, ...) instead of session IDs
-- **Urgent alerts** - recipients get `<system-reminder>` when they have unread mail
+Agents get friendly names (agentA, agentB, ...) and automatically discover each other. When an agent has unread messages, they get an urgent notification.
 
-## Files
+The system lives in memory — fast, no file clutter, resets on restart.
 
-```
-iam/
-├── index.ts      # Plugin + tool + hooks
-├── prompt.ts     # LLM-facing prompts
-├── logger.ts     # Logs to .logs/iam.log
-├── PROGRESS.md   # Development history
-└── README.md
-```
+## Debug Logs
 
-## Logs
-
-Debug logs written to `.logs/iam.log` (clears on restart). Shows all tool calls, messages sent, sessions registered, and notifications injected.
+For troubleshooting, check `.logs/iam.log` (clears on restart). Shows all tool calls, messages, and notifications.
