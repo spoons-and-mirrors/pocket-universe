@@ -14,6 +14,8 @@ When you spawn multiple agents with the `task` tool, they can:
 
 Agents get friendly names (agentA, agentB, ...) and automatically discover each other. When an agent has unread messages, they get an urgent notification.
 
+When an agent announces, the response immediately shows all other parallel agents — whether they've announced yet or not. This gives agents instant awareness of who's working alongside them and on what.
+
 The system lives in memory — fast, no file clutter, resets on restart.
 
 ## Debug Logs
