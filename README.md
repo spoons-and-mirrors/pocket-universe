@@ -15,8 +15,6 @@ Agents get friendly names (agentA, agentB, ...) and automatically discover each 
 
 When an agent announces, the response shows all other parallel agents — whether they've announced yet or not. This gives agents instant awareness of who's working alongside them. Agents can re-announce to update their status.
 
-Agents who haven't announced are told they MUST announce before continuing.
-
 When an agent completes their task, they're encouraged to broadcast a completion message so others know.
 
 ## Actions
@@ -41,6 +39,3 @@ action="broadcast", to="agentA", message="Can you check auth.ts?"
 action="broadcast", to="agentA,agentC", message="Sync up on API changes"
 ```
 
-## Debug Logs
-
-For troubleshooting, check `.logs/iam.log` (clears on restart).
