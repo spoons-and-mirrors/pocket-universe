@@ -16,6 +16,7 @@ import {
   unknownAction,
   SYSTEM_PROMPT,
   urgentNotification,
+  type ParallelAgent,
 } from "./prompt"
 import { log, LOG } from "./logger"
 
@@ -235,7 +236,13 @@ const plugin: Plugin = async () => {
               setDescription(sessionId, args.message)
               const alias = getAlias(sessionId)
               
-              return announceResult(alias)
+              // Gather info about all parallel agents
+              const parallelAgents = getKnownAgents(sessionId).map(agentAlias => ({
+                alias: agentAlias,
+                description: getDescription(agentAlias)
+              }))
+              
+              return announceResult(alias, parallelAgents)
             }
             
             default:

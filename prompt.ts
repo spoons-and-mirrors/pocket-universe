@@ -68,8 +68,29 @@ export const WRITE_MISSING_TO = `Error: 'to' parameter is required for action="w
 export const WRITE_MISSING_MESSAGE = `Error: 'message' parameter is required for action="write".`;
 export const ANNOUNCE_MISSING_MESSAGE = `Error: 'message' parameter is required for action="announce". Describe what you're working on.`;
 
-export function announceResult(alias: string): string {
-  return `Announced! Other agents will see your description when they list sessions.\n\nYou are: ${alias}`;
+export interface ParallelAgent {
+  alias: string;
+  description?: string;
+}
+
+export function announceResult(alias: string, parallelAgents: ParallelAgent[]): string {
+  const lines = [`Announced! Other agents will see your description when they list sessions.`, ``, `You are: ${alias}`];
+  
+  if (parallelAgents.length > 0) {
+    lines.push(``);
+    lines.push(`--- Parallel Agents ---`);
+    for (const agent of parallelAgents) {
+      if (agent.description) {
+        lines.push(`• ${agent.alias} is working on: ${agent.description}`);
+      } else {
+        lines.push(`• ${agent.alias} is running (hasn't announced yet)`);
+      }
+    }
+    lines.push(``);
+    lines.push(`Use action="write" to coordinate with them if needed.`);
+  }
+  
+  return lines.join("\n");
 }
 
 export function writeUnknownRecipient(to: string, known: string[]): string {
