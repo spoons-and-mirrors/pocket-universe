@@ -5,8 +5,7 @@
 export const TOOL_DESCRIPTION = `Inter-agent messaging. Use this to communicate with other parallel agents (task tools).
 
 Actions:
-- "announce": Announce what you're working on (do this first!). You can re-announce to update your status.
-- "sessions": Show all parallel agents and what they're doing
+- "announce": Announce what you're working on (do this first!). Shows all parallel agents. You can re-announce to update your status.
 - "read": Read your messages (marks them as read)
 - "broadcast": Send a message (requires 'message', optional 'to')`;
 
@@ -41,32 +40,6 @@ export function formatAgentList(agents: ParallelAgent[]): string[] {
   return lines;
 }
 
-export function sessionsResult(
-  alias: string,
-  agents: ParallelAgent[],
-  hasAnnounced: boolean
-): string {
-  const lines = [`You are: ${alias}`, ``];
-
-  if (agents.length === 0) {
-    lines.push(`No other agents running yet.`);
-    lines.push(``);
-    lines.push(`Agents will appear here when parallel tasks are spawned.`);
-  } else {
-    lines.push(`--- Parallel Agents ---`);
-    lines.push(...formatAgentList(agents));
-    lines.push(``);
-    lines.push(`Use action="broadcast" to coordinate with them.`);
-  }
-
-  if (!hasAnnounced) {
-    lines.push(``);
-    lines.push(`Tip: Use action="announce" to let others know what you're doing.`);
-  }
-
-  return lines.join("\n");
-}
-
 export function readResult(
   alias: string,
   messages: { from: string; body: string; timestamp: number; read: boolean }[],
@@ -94,7 +67,7 @@ export function readResult(
 
   if (!hasAnnounced) {
     lines.push(``);
-    lines.push(`Tip: Use action="announce" to let others know what you're doing.`);
+    lines.push(`IMPORTANT: You MUST use action="announce" to declare what you're working on before continuing.`);
   }
 
   return lines.join("\n");
@@ -102,7 +75,7 @@ export function readResult(
 
 export function announceResult(alias: string, parallelAgents: ParallelAgent[]): string {
   const lines = [
-    `Announced! Other agents will see your description when they list sessions.`,
+    `Announced! Other agents will see your description when they call announce.`,
     ``,
     `You are: ${alias}`,
   ];
@@ -113,6 +86,9 @@ export function announceResult(alias: string, parallelAgents: ParallelAgent[]): 
     lines.push(...formatAgentList(parallelAgents));
     lines.push(``);
     lines.push(`Use action="broadcast" to coordinate with them.`);
+  } else {
+    lines.push(``);
+    lines.push(`No other agents running yet.`);
   }
 
   return lines.join("\n");
@@ -131,7 +107,7 @@ export function broadcastResult(recipients: string[], messageId: string): string
 }
 
 export function unknownAction(action: string): string {
-  return `Unknown action: ${action}. Valid actions: announce, sessions, read, broadcast`;
+  return `Unknown action: ${action}. Valid actions: announce, read, broadcast`;
 }
 
 // =============================================================================
@@ -146,7 +122,6 @@ You have access to an \`iam\` tool for communicating with other parallel agents.
 
 Usage:
 - action="announce", message="..." - Announce what you're working on (do this first!)
-- action="sessions" - See other agents and what they're doing
 - action="read" - Read your messages
 - action="broadcast", message="..." - Message all agents
 - action="broadcast", to="agentA", message="..." - Message specific agent(s)

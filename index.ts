@@ -3,7 +3,6 @@ import { tool } from "@opencode-ai/plugin"
 import {
   TOOL_DESCRIPTION,
   ARG_DESCRIPTIONS,
-  sessionsResult,
   readResult,
   BROADCAST_MISSING_MESSAGE,
   announceResult,
@@ -159,7 +158,7 @@ const plugin: Plugin = async () => {
       iam: tool({
         description: TOOL_DESCRIPTION,
         args: {
-          action: tool.schema.enum(["sessions", "read", "broadcast", "announce"]).describe(
+          action: tool.schema.enum(["read", "broadcast", "announce"]).describe(
             ARG_DESCRIPTIONS.action
           ),
           to: tool.schema.string().optional().describe(
@@ -181,12 +180,6 @@ const plugin: Plugin = async () => {
           log.debug(LOG.TOOL, `iam action: ${args.action}`, { sessionId, alias, args })
           
           switch (args.action) {
-            case "sessions": {
-              const agents = getParallelAgents(sessionId)
-              log.debug(LOG.TOOL, `sessions result`, { alias, agentCount: agents.length })
-              return sessionsResult(alias, agents, announced)
-            }
-            
             case "read": {
               const messages = getAllMessages(sessionId)
               const unreadCount = messages.filter(m => !m.read).length
@@ -217,7 +210,7 @@ const plugin: Plugin = async () => {
               }
               
               if (targetAliases.length === 0) {
-                return `No agents to broadcast to. Use action="sessions" to see available agents.`
+                return `No agents to broadcast to. Use action="announce" to see parallel agents.`
               }
               
               // Resolve all aliases and validate

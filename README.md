@@ -5,18 +5,17 @@ Lets parallel subagents talk to each other. No configuration needed — just ins
 ## What It Does
 
 When you spawn multiple agents with the `task` tool, they can:
-- **Announce** what they're working on (and re-announce to update status)
-- **Discover** other agents and see what they're doing
+- **Announce** what they're working on (and see all parallel agents)
 - **Broadcast** messages to one, some, or all agents
 - Get **notified** when new messages arrive
 
 ## How It Works
 
-Agents get friendly names (agentA, agentB, ...) and automatically discover each other. Every response reminds agents who they are and shows parallel agents.
+Agents get friendly names (agentA, agentB, ...) and automatically discover each other.
 
-When an agent announces, the response immediately shows all other parallel agents — whether they've announced yet or not. This gives agents instant awareness of who's working alongside them.
+When an agent announces, the response shows all other parallel agents — whether they've announced yet or not. This gives agents instant awareness of who's working alongside them. Agents can re-announce to update their status.
 
-Agents who haven't announced yet get a gentle nudge to do so.
+Agents who haven't announced are told they MUST announce before continuing.
 
 When an agent completes their task, they're encouraged to broadcast a completion message so others know.
 
@@ -24,19 +23,15 @@ When an agent completes their task, they're encouraged to broadcast a completion
 
 | Action | Description |
 |--------|-------------|
-| `announce` | Declare what you're working on. Can be called again to update. |
-| `sessions` | List all parallel agents and their status. |
+| `announce` | Declare what you're working on. Shows all parallel agents. Can re-announce to update. |
 | `read` | Read your inbox (marks messages as read). |
 | `broadcast` | Send a message. Use `to` for specific agent(s), or omit for all. |
 
 ## Examples
 
 ```
-# Announce what you're doing
+# Announce what you're doing (also shows parallel agents)
 action="announce", message="Refactoring the auth module"
-
-# See who else is running
-action="sessions"
 
 # Message everyone
 action="broadcast", message="Found a bug in config.ts, heads up"
