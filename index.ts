@@ -355,6 +355,17 @@ const plugin: Plugin = async (ctx) => {
       
       output.messages.push(syntheticMessage as any)
     },
+    
+    // Add iam to subagent_tools so it's only available to subagents
+    config: async (opencodeConfig) => {
+      const experimental = opencodeConfig.experimental as any ?? {}
+      const existingSubagentTools = experimental.subagent_tools ?? []
+      opencodeConfig.experimental = {
+        ...experimental,
+        subagent_tools: [...existingSubagentTools, "iam"],
+      } as typeof opencodeConfig.experimental
+      log.info(LOG.HOOK, `Added 'iam' to experimental.subagent_tools`)
+    },
   }
 }
 
