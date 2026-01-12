@@ -71,7 +71,11 @@ function hasAnnounced(sessionId: string): boolean {
   return agentDescriptions.has(alias)
 }
 
-function resolveAlias(aliasOrSessionId: string): string | undefined {
+function resolveAlias(aliasOrSessionId: string, parentId?: string | null): string | undefined {
+  // Handle special "parent" alias
+  if (aliasOrSessionId === "parent" && parentId) {
+    return parentId
+  }
   // Try alias first, then assume it's a session ID
   return aliasToSession.get(aliasOrSessionId) || 
     (activeSessions.has(aliasOrSessionId) ? aliasOrSessionId : undefined)
@@ -243,10 +247,13 @@ const plugin: Plugin = async (ctx) => {
                 return `No agents to broadcast to. Use action="announce" to see parallel agents.`
               }
               
+              // Get parent ID early so we can resolve "parent" alias
+              const parentId = await getParentId(client, sessionId)
+              
               // Resolve all aliases and validate
               const recipientSessions: string[] = []
               for (const targetAlias of targetAliases) {
-                const recipientSessionId = resolveAlias(targetAlias)
+                const recipientSessionId = resolveAlias(targetAlias, parentId)
                 if (!recipientSessionId) {
                   log.warn(LOG.TOOL, `broadcast unknown recipient`, { alias, to: targetAlias })
                   return broadcastUnknownRecipient(targetAlias, knownAgents)
@@ -259,6 +266,27 @@ const plugin: Plugin = async (ctx) => {
               for (const recipientSessionId of recipientSessions) {
                 const msg = sendMessage(alias, recipientSessionId, args.message)
                 messageId = msg.id // Use last message ID
+              }
+              
+              // Check if we're broadcasting to our parent session - if so, wake it up
+              if (parentId && recipientSessions.includes(parentId)) {
+                log.info(LOG.MESSAGE, `Broadcasting to parent session, calling notify_once`, { sessionId, parentId })
+                try {
+                  // Call notify_once to wake parent for one model iteration
+                  // Access the internal SDK client to make a raw POST request
+                  const internalClient = (client as any)._client
+                  if (internalClient?.post) {
+                    await internalClient.post({
+                      url: `/session/${parentId}/notify_once`,
+                      body: { text: `[IAM] Message from ${alias}: ${args.message}` },
+                    })
+                    log.info(LOG.MESSAGE, `Parent session notified successfully`, { parentId })
+                  } else {
+                    log.warn(LOG.MESSAGE, `Could not access SDK client for notify_once`, { parentId })
+                  }
+                } catch (e) {
+                  log.warn(LOG.MESSAGE, `Failed to notify parent session`, { parentId, error: String(e) })
+                }
               }
               
               return broadcastResult(targetAliases, messageId)
