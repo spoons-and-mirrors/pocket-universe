@@ -3,7 +3,6 @@ import { tool } from "@opencode-ai/plugin"
 import {
   TOOL_DESCRIPTION,
   ARG_DESCRIPTIONS,
-  readResult,
   BROADCAST_MISSING_MESSAGE,
   announceResult,
   broadcastUnknownRecipient,
@@ -192,7 +191,7 @@ const plugin: Plugin = async (ctx) => {
       iam: tool({
         description: TOOL_DESCRIPTION,
         args: {
-          action: tool.schema.enum(["read", "broadcast", "announce"]).describe(
+          action: tool.schema.enum(["broadcast", "announce"]).describe(
             ARG_DESCRIPTIONS.action
           ),
           to: tool.schema.string().optional().describe(
@@ -214,17 +213,6 @@ const plugin: Plugin = async (ctx) => {
           log.debug(LOG.TOOL, `iam action: ${args.action}`, { sessionId, alias, args })
           
           switch (args.action) {
-            case "read": {
-              const messages = getAllMessages(sessionId)
-              const unreadCount = messages.filter(m => !m.read).length
-              log.debug(LOG.TOOL, `read inbox`, { alias, total: messages.length, unread: unreadCount })
-              
-              // Mark all as read
-              markAllRead(sessionId)
-              
-              return readResult(alias, messages, unreadCount, announced)
-            }
-            
             case "broadcast": {
               if (!args.message) {
                 log.warn(LOG.TOOL, `broadcast missing 'message'`, { alias })
@@ -353,7 +341,7 @@ const plugin: Plugin = async (ctx) => {
       
       log.info(LOG.INJECT, `Injecting urgent notification`, { sessionId, unreadCount: unread.length })
       
-      // Create synthetic user message with notification
+      // Create synthetic user message with notification including full message details
       const syntheticMessage = {
         info: {
           id: "msg_iam_" + Date.now(),
@@ -369,7 +357,7 @@ const plugin: Plugin = async (ctx) => {
             sessionID: sessionId,
             messageID: "msg_iam_" + Date.now(),
             type: "text" as const,
-            text: urgentNotification(unread.length),
+            text: urgentNotification(unread.map(m => ({ from: m.from, body: m.body, timestamp: m.timestamp }))),
           }
         ]
       }

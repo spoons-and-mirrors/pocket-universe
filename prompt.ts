@@ -6,7 +6,6 @@ export const TOOL_DESCRIPTION = `Inter-agent messaging. Use this to communicate 
 
 Actions:
 - "announce": Announce what you're working on (do this first!). Shows all parallel agents. You can re-announce to update your status.
-- "read": Read your messages (marks them as read)
 - "broadcast": Send a message (requires 'message', optional 'to')`;
 
 export const ARG_DESCRIPTIONS = {
@@ -38,39 +37,6 @@ export function formatAgentList(agents: ParallelAgent[]): string[] {
     }
   }
   return lines;
-}
-
-export function readResult(
-  alias: string,
-  messages: { from: string; body: string; timestamp: number; read: boolean }[],
-  unreadCount: number,
-  hasAnnounced: boolean
-): string {
-  const lines = [`You are: ${alias}`, ``];
-
-  if (messages.length === 0) {
-    lines.push(`No messages in your inbox.`);
-  } else {
-    lines.push(`Your inbox (${unreadCount} were unread):`, `---`);
-
-    for (const msg of messages) {
-      const time = new Date(msg.timestamp).toISOString();
-      const status = msg.read ? "" : " [NEW]";
-      lines.push(`[${time}] From: ${msg.from}${status}`);
-      lines.push(msg.body);
-      lines.push(`---`);
-    }
-
-    lines.push(``);
-    lines.push(`To reply: use action="broadcast" with to="<sender>" and message="..."`);
-  }
-
-  if (!hasAnnounced) {
-    lines.push(``);
-    lines.push(`IMPORTANT: You MUST use action="announce" to declare what you're working on before continuing.`);
-  }
-
-  return lines.join("\n");
 }
 
 export function announceResult(alias: string, parallelAgents: ParallelAgent[]): string {
@@ -138,9 +104,27 @@ When you complete your task, broadcast to all: "Done. Here's what I found/did: .
 // Urgent notification injection
 // =============================================================================
 
-export function urgentNotification(unreadCount: number): string {
-  return `<system-reminder priority="critical">
-URGENT: You have ${unreadCount} unread message(s) in your IAM inbox.
-Use the iam tool with action="read" NOW to check your messages before continuing other work.
-</system-reminder>`;
+export interface UnreadMessage {
+  from: string;
+  body: string;
+  timestamp: number;
+}
+
+export function urgentNotification(messages: UnreadMessage[]): string {
+  const lines = [
+    `<system-reminder priority="critical">`,
+    `URGENT: You have ${messages.length} unread message(s) from other agents.`,
+    ``,
+  ];
+  
+  for (const msg of messages) {
+    lines.push(`From: ${msg.from}`);
+    lines.push(`Message: ${msg.body}`);
+    lines.push(``);
+  }
+  
+  lines.push(`Respond NOW using: iam tool with action="broadcast", to="<sender>", message="<your response>"`);
+  lines.push(`</system-reminder>`);
+  
+  return lines.join("\n");
 }
