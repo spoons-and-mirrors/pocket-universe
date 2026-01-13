@@ -1,8 +1,8 @@
 # IAM (Inter-Agent Messaging)
 
-Enable parallel agents communication for opencode
+### Enable parallel agents communication for opencode
 
-`@spoons-and-mirrors/iam@latest`
+![header](./header.webp)
 
 ## How It Works
 
