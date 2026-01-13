@@ -7,8 +7,10 @@ import {
   broadcastMessageTooLong,
   broadcastUnknownRecipient,
   broadcastResult,
+  buildInboxContent,
   SYSTEM_PROMPT,
   type ParallelAgent,
+  type InboxMessage,
 } from "./prompt";
 import { log, LOG } from "./logger";
 
@@ -19,7 +21,8 @@ import { log, LOG } from "./logger";
 const CHAR_CODE_A = 65; // ASCII code for 'A'
 const ALPHABET_SIZE = 26;
 const MAX_DESCRIPTION_LENGTH = 100;
-const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes for handled messages
+const UNHANDLED_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for unhandled messages
 const MAX_QUEUE_SIZE = 100; // Max messages per queue
 const PARENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // Run cleanup every minute
@@ -32,12 +35,13 @@ const MAX_MESSAGE_LENGTH = 10000; // Prevent excessively long messages
 // ============================================================================
 
 interface PendingMessage {
-  id: string;
+  id: string; // Internal ID (random string)
+  msgIndex: number; // Numeric index for display (1-based, per session)
   from: string;
   to: string;
   body: string;
   timestamp: number;
-  delivered: boolean;
+  handled: boolean;
 }
 
 interface CachedParentId {
@@ -128,7 +132,10 @@ interface ConfigTransformOutput {
 // Pending messages indexed by recipient session ID
 const pendingMessages = new Map<string, PendingMessage[]>();
 
-// Track ALL active sessions (simpler approach - register on first iam use)
+// Message index counter per session (for numeric IDs)
+const sessionMsgCounter = new Map<string, number>();
+
+// Track ALL active sessions
 const activeSessions = new Set<string>();
 
 // Alias mappings: sessionId <-> alias (e.g., "agentA", "agentB")
@@ -154,35 +161,33 @@ function cleanupExpiredMessages(): void {
   for (const [sessionId, messages] of pendingMessages) {
     const before = messages.length;
 
-    // Remove expired messages (keep undelivered ones longer)
+    // Remove expired messages based on handled status
     const filtered = messages.filter((m: PendingMessage) => {
-      if (m.delivered) {
+      if (m.handled) {
         return now - m.timestamp < MESSAGE_TTL_MS;
       }
-      // Keep undelivered messages 3x longer
-      return now - m.timestamp < MESSAGE_TTL_MS * 3;
+      // Keep unhandled messages much longer
+      return now - m.timestamp < UNHANDLED_TTL_MS;
     });
 
-    // Also trim to max size if needed
+    // Trim to max size if needed
     if (filtered.length > MAX_QUEUE_SIZE) {
-      // Keep newest messages, remove oldest delivered ones first
-      const pending = filtered.filter((m: PendingMessage) => !m.delivered);
-      const delivered = filtered.filter((m: PendingMessage) => m.delivered);
-      delivered.sort(
+      const unhandled = filtered.filter((m: PendingMessage) => !m.handled);
+      const handled = filtered.filter((m: PendingMessage) => m.handled);
+      handled.sort(
         (a: PendingMessage, b: PendingMessage) => b.timestamp - a.timestamp,
       );
 
-      // Fix: Handle case where pending alone exceeds limit
-      if (pending.length > MAX_QUEUE_SIZE) {
-        pending.sort(
+      if (unhandled.length > MAX_QUEUE_SIZE) {
+        unhandled.sort(
           (a: PendingMessage, b: PendingMessage) => b.timestamp - a.timestamp,
         );
-        pendingMessages.set(sessionId, pending.slice(0, MAX_QUEUE_SIZE));
+        pendingMessages.set(sessionId, unhandled.slice(0, MAX_QUEUE_SIZE));
         totalRemoved += before - MAX_QUEUE_SIZE;
       } else {
         const kept = [
-          ...pending,
-          ...delivered.slice(0, MAX_QUEUE_SIZE - pending.length),
+          ...unhandled,
+          ...handled.slice(0, MAX_QUEUE_SIZE - unhandled.length),
         ];
         pendingMessages.set(sessionId, kept);
         totalRemoved += before - kept.length;
@@ -218,7 +223,6 @@ setInterval(cleanupExpiredMessages, CLEANUP_INTERVAL_MS);
 // ============================================================================
 
 function getNextAlias(): string {
-  // Atomically get and increment the counter
   const index = nextAgentIndex;
   nextAgentIndex++;
 
@@ -262,6 +266,13 @@ function generateId(): string {
   return Math.random().toString(36).substring(2, 10);
 }
 
+function getNextMsgIndex(sessionId: string): number {
+  const current = sessionMsgCounter.get(sessionId) || 0;
+  const next = current + 1;
+  sessionMsgCounter.set(sessionId, next);
+  return next;
+}
+
 function getMessageQueue(sessionId: string): PendingMessage[] {
   if (!pendingMessages.has(sessionId)) {
     pendingMessages.set(sessionId, []);
@@ -276,23 +287,24 @@ function getMessageQueue(sessionId: string): PendingMessage[] {
 function sendMessage(from: string, to: string, body: string): PendingMessage {
   const message: PendingMessage = {
     id: generateId(),
+    msgIndex: getNextMsgIndex(to),
     from,
     to,
     body,
     timestamp: Date.now(),
-    delivered: false,
+    handled: false,
   };
 
   const queue = getMessageQueue(to);
 
   // Enforce max queue size
   if (queue.length >= MAX_QUEUE_SIZE) {
-    // Remove oldest delivered message, or oldest message if all pending
-    const deliveredIndex = queue.findIndex((m) => m.delivered);
-    if (deliveredIndex !== -1) {
-      queue.splice(deliveredIndex, 1);
+    // Remove oldest handled message, or oldest message if all unhandled
+    const handledIndex = queue.findIndex((m) => m.handled);
+    if (handledIndex !== -1) {
+      queue.splice(handledIndex, 1);
     } else {
-      queue.shift(); // Remove oldest
+      queue.shift();
     }
     log.warn(LOG.MESSAGE, `Queue full, removed oldest message`, { to });
   }
@@ -300,6 +312,7 @@ function sendMessage(from: string, to: string, body: string): PendingMessage {
   queue.push(message);
   log.info(LOG.MESSAGE, `Message sent`, {
     id: message.id,
+    msgIndex: message.msgIndex,
     from,
     to,
     bodyLength: body.length,
@@ -307,12 +320,31 @@ function sendMessage(from: string, to: string, body: string): PendingMessage {
   return message;
 }
 
-function getUndeliveredMessages(sessionId: string): PendingMessage[] {
-  return getMessageQueue(sessionId).filter((m) => !m.delivered);
+function getUnhandledMessages(sessionId: string): PendingMessage[] {
+  return getMessageQueue(sessionId).filter((m) => !m.handled);
+}
+
+function markMessagesAsHandled(
+  sessionId: string,
+  msgIndices: number[],
+): number {
+  const queue = getMessageQueue(sessionId);
+  let count = 0;
+  for (const msg of queue) {
+    if (msgIndices.includes(msg.msgIndex) && !msg.handled) {
+      msg.handled = true;
+      count++;
+      log.info(LOG.MESSAGE, `Message marked as handled`, {
+        sessionId,
+        msgIndex: msg.msgIndex,
+        from: msg.from,
+      });
+    }
+  }
+  return count;
 }
 
 function getKnownAliases(sessionId: string): string[] {
-  // Return aliases of all active sessions except self
   const selfAlias = sessionToAlias.get(sessionId);
   const agents: string[] = [];
   for (const alias of aliasToSession.keys()) {
@@ -324,7 +356,6 @@ function getKnownAliases(sessionId: string): string[] {
 }
 
 function getParallelAgents(sessionId: string): ParallelAgent[] {
-  // Directly iterate aliases without calling getKnownAliases again
   const selfAlias = sessionToAlias.get(sessionId);
   const agents: ParallelAgent[] = [];
   for (const alias of aliasToSession.keys()) {
@@ -339,22 +370,17 @@ function getParallelAgents(sessionId: string): ParallelAgent[] {
 }
 
 function registerSession(sessionId: string): void {
-  // Check if already registered
   if (activeSessions.has(sessionId)) {
     return;
   }
 
-  // Acquire lock to prevent race condition
   if (registeringSessionsLock.has(sessionId)) {
-    // Another registration in progress, wait and return
-    // In practice this is a sync check so we just return
     return;
   }
 
   registeringSessionsLock.add(sessionId);
 
   try {
-    // Double-check after acquiring lock
     if (!activeSessions.has(sessionId)) {
       activeSessions.add(sessionId);
       const alias = getNextAlias();
@@ -381,7 +407,6 @@ async function getParentId(
 ): Promise<string | null> {
   const now = Date.now();
 
-  // Check cache first (with expiry)
   const cached = sessionParentCache.get(sessionId);
   if (cached && now - cached.cachedAt < PARENT_CACHE_TTL_MS) {
     return cached.value;
@@ -398,7 +423,6 @@ async function getParentId(
       sessionId,
       error: String(e),
     });
-    // Cache failure for shorter duration (1 minute) to allow retry
     sessionParentCache.set(sessionId, {
       value: null,
       cachedAt: now - PARENT_CACHE_TTL_MS + 60000,
@@ -408,7 +432,7 @@ async function getParentId(
 }
 
 // ============================================================================
-// Helper to create assistant message with tool part
+// Helper to create bundled assistant message with inbox
 // ============================================================================
 
 interface AssistantMessage {
@@ -441,40 +465,40 @@ interface AssistantMessage {
     tool: string;
     state: {
       status: string;
-      input: { from: string; messageId: string; timestamp: number };
+      input: { count: number };
       output: string;
       title: string;
-      metadata: {
-        iam_sender: string;
-        iam_message_id: string;
-        iam_timestamp: number;
-      };
+      metadata: { iam_inbox: boolean; message_count: number };
       time: { start: number; end: number };
     };
   }>;
 }
 
-function createAssistantMessageWithToolPart(
+function createInboxMessage(
   sessionId: string,
-  senderAlias: string,
-  messageBody: string,
-  messageId: string,
-  timestamp: number,
+  messages: PendingMessage[],
   baseUserMessage: UserMessage,
 ): AssistantMessage {
   const now = Date.now();
   const userInfo = baseUserMessage.info;
 
-  const assistantMessageId = `msg_iam_${now}_${messageId}`;
-  const partId = `prt_iam_${now}_${messageId}`;
-  const callId = `call_iam_${now}_${messageId}`;
+  const inboxMsgs: InboxMessage[] = messages.map((m) => ({
+    id: m.msgIndex,
+    from: m.from,
+    body: m.body,
+    timestamp: m.timestamp,
+  }));
 
-  log.debug(LOG.MESSAGE, `Creating assistant message with tool part`, {
+  const content = buildInboxContent(inboxMsgs);
+
+  const assistantMessageId = `msg_iam_inbox_${now}`;
+  const partId = `prt_iam_inbox_${now}`;
+  const callId = `call_iam_inbox_${now}`;
+
+  log.debug(LOG.MESSAGE, `Creating bundled inbox message`, {
     sessionId,
-    senderAlias,
-    messageId: assistantMessageId,
-    partId,
-    callId,
+    messageCount: messages.length,
+    msgIndices: messages.map((m) => m.msgIndex),
   });
 
   const result: AssistantMessage = {
@@ -487,10 +511,7 @@ function createAssistantMessageWithToolPart(
       modelID: userInfo.model?.modelID || DEFAULT_MODEL_ID,
       providerID: userInfo.model?.providerID || DEFAULT_PROVIDER_ID,
       mode: "default",
-      path: {
-        cwd: "/",
-        root: "/",
-      },
+      path: { cwd: "/", root: "/" },
       time: { created: now, completed: now },
       cost: 0,
       tokens: {
@@ -507,25 +528,15 @@ function createAssistantMessageWithToolPart(
         messageID: assistantMessageId,
         type: "tool",
         callID: callId,
-        tool: "iam_message",
+        tool: "iam_inbox",
         state: {
           status: "completed",
-          input: {
-            from: senderAlias,
-            messageId: messageId,
-            timestamp: timestamp,
-          },
-          output: `📨 INCOMING MESSAGE FROM ${senderAlias.toUpperCase()} 📨
-
-${messageBody}
-
----
-Reply using: broadcast(recipient="${senderAlias}", message="your response")`,
-          title: `📨 Message from ${senderAlias}`,
+          input: { count: messages.length },
+          output: content,
+          title: `📨 Inbox (${messages.length} messages)`,
           metadata: {
-            iam_sender: senderAlias,
-            iam_message_id: messageId,
-            iam_timestamp: timestamp,
+            iam_inbox: true,
+            message_count: messages.length,
           },
           time: { start: now, end: now },
         },
@@ -533,7 +544,6 @@ Reply using: broadcast(recipient="${senderAlias}", message="your response")`,
     ],
   };
 
-  // Add variant if present
   if (userInfo.variant !== undefined) {
     result.info.variant = userInfo.variant;
   }
@@ -559,10 +569,18 @@ const plugin: Plugin = async (ctx) => {
             .optional()
             .describe("Target agent(s), comma-separated. Omit to send to all."),
           message: tool.schema.string().describe("Your message"),
+          reply_to: tool.schema
+            .string()
+            .optional()
+            .describe(
+              "Comma-separated message IDs to mark as handled (e.g., '1,2,3')",
+            ),
         },
         async execute(args, context: ToolContext) {
           const sessionId = context.sessionID;
           const isFirstCall = !activeSessions.has(sessionId);
+
+          // Register if not already (should already be registered via system.transform)
           registerSession(sessionId);
 
           const alias = getAlias(sessionId);
@@ -593,9 +611,28 @@ const plugin: Plugin = async (ctx) => {
             sessionId,
             alias,
             recipient: args.recipient,
+            reply_to: args.reply_to,
             messageLength: args.message.length,
             isFirstCall,
           });
+
+          // Handle reply_to - mark messages as handled
+          let handledCount = 0;
+          if (args.reply_to) {
+            const msgIndices = args.reply_to
+              .split(",")
+              .map((s) => parseInt(s.trim(), 10))
+              .filter((n) => !isNaN(n));
+
+            if (msgIndices.length > 0) {
+              handledCount = markMessagesAsHandled(sessionId, msgIndices);
+              log.info(LOG.TOOL, `Handled messages via reply_to`, {
+                alias,
+                requested: msgIndices,
+                actuallyHandled: handledCount,
+              });
+            }
+          }
 
           const knownAgents = getKnownAliases(sessionId);
           const parallelAgents = getParallelAgents(sessionId);
@@ -611,12 +648,12 @@ const plugin: Plugin = async (ctx) => {
               .filter(Boolean);
           }
 
-          // If no agents to send to, just return registration info
+          // If no agents to send to, just return info
           if (targetAliases.length === 0) {
             log.info(LOG.TOOL, `No recipients, returning agent info`, {
               alias,
             });
-            return broadcastResult(alias, [], "", parallelAgents, isFirstCall);
+            return broadcastResult(alias, [], parallelAgents, handledCount);
           }
 
           const parentId = await getParentId(client, sessionId);
@@ -632,13 +669,11 @@ const plugin: Plugin = async (ctx) => {
               });
               return broadcastUnknownRecipient(targetAlias, knownAgents);
             }
-            // Skip sending to yourself - with user feedback
             if (recipientSessionId === sessionId) {
               log.warn(LOG.TOOL, `Skipping self-message`, {
                 alias,
                 targetAlias,
               });
-              // If ONLY targeting self, return explicit error
               if (targetAliases.length === 1) {
                 return BROADCAST_SELF_MESSAGE;
               }
@@ -652,37 +687,23 @@ const plugin: Plugin = async (ctx) => {
             log.info(LOG.TOOL, `No valid recipients after filtering`, {
               alias,
             });
-            return broadcastResult(alias, [], "", parallelAgents, isFirstCall);
+            return broadcastResult(alias, [], parallelAgents, handledCount);
           }
 
-          // Check if we're broadcasting to parent (to send notification)
+          // Check if we're broadcasting to parent
           const isTargetingParent =
             parentId && recipientSessions.includes(parentId);
 
-          const messageIds: string[] = [];
           for (const recipientSessionId of recipientSessions) {
-            const msg = sendMessage(alias, recipientSessionId, args.message);
-            messageIds.push(msg.id);
-
-            log.info(LOG.MESSAGE, `Message queued for recipient`, {
-              senderAlias: alias,
-              senderSessionId: sessionId,
-              recipientSessionId,
-              messageId: msg.id,
-              messageLength: args.message.length,
-              isParent: recipientSessionId === parentId,
-            });
+            sendMessage(alias, recipientSessionId, args.message);
           }
 
-          // Only notify parent session (not siblings)
+          // Notify parent session if targeted
           if (isTargetingParent) {
             log.info(
               LOG.MESSAGE,
               `Broadcasting to parent session, calling notify_once`,
-              {
-                sessionId,
-                parentId,
-              },
+              { sessionId, parentId },
             );
             try {
               const internalClient = (
@@ -698,12 +719,6 @@ const plugin: Plugin = async (ctx) => {
                 log.info(LOG.MESSAGE, `Parent session notified successfully`, {
                   parentId,
                 });
-              } else {
-                log.warn(
-                  LOG.MESSAGE,
-                  `Could not access SDK client for notify_once`,
-                  { parentId },
-                );
               }
             } catch (e) {
               log.warn(LOG.MESSAGE, `Failed to notify parent session`, {
@@ -713,20 +728,17 @@ const plugin: Plugin = async (ctx) => {
             }
           }
 
-          // Return first message ID for backward compatibility
-          const displayMessageId = messageIds.length > 0 ? messageIds[0] : "";
           return broadcastResult(
             alias,
             validTargets,
-            displayMessageId,
             parallelAgents,
-            isFirstCall,
+            handledCount,
           );
         },
       }),
     },
 
-    // Register subagents when task tool completes
+    // Register subagents when task tool completes (backup registration)
     "tool.execute.after": async (
       input: ToolExecuteInput,
       output: ToolExecuteOutput,
@@ -738,25 +750,18 @@ const plugin: Plugin = async (ctx) => {
       });
 
       if (input.tool === "task") {
-        log.debug(LOG.HOOK, `task metadata`, {
-          metadata: output.metadata,
-          output: output.output?.substring?.(0, 200),
-        });
-
         const newSessionId = (output.metadata?.sessionId ||
           output.metadata?.session_id) as string | undefined;
         if (newSessionId) {
-          log.info(LOG.HOOK, `task completed, registering session`, {
+          log.info(LOG.HOOK, `task completed, ensuring session registered`, {
             newSessionId,
           });
           registerSession(newSessionId);
-        } else {
-          log.warn(LOG.HOOK, `task completed but no session_id in metadata`);
         }
       }
     },
 
-    // Inject IAM instructions into system prompt for child sessions only
+    // PRE-REGISTER agents on first LLM call + inject system prompt
     "experimental.chat.system.transform": async (
       input: SystemTransformInput,
       output: SystemTransformOutput,
@@ -770,12 +775,22 @@ const plugin: Plugin = async (ctx) => {
         return;
       }
 
-      // Inject IAM instructions for all sessions
+      // Register session early - before agent even calls broadcast
+      registerSession(sessionId);
+
+      // Inject IAM instructions
       output.system.push(SYSTEM_PROMPT);
-      log.info(LOG.INJECT, `Injected IAM system prompt`, { sessionId });
+      log.info(
+        LOG.INJECT,
+        `Registered session and injected IAM system prompt`,
+        {
+          sessionId,
+          alias: getAlias(sessionId),
+        },
+      );
     },
 
-    // Inject assistant messages with tool parts for unread IAM messages
+    // Inject ONE bundled inbox message at the END of the chain
     "experimental.chat.messages.transform": async (
       _input: unknown,
       output: MessagesTransformOutput,
@@ -792,59 +807,33 @@ const plugin: Plugin = async (ctx) => {
       }
 
       const sessionId = lastUserMsg.info.sessionID;
-      const undelivered = getUndeliveredMessages(sessionId);
+      const unhandled = getUnhandledMessages(sessionId);
 
-      log.debug(LOG.INJECT, `Checking for undelivered messages in transform`, {
+      log.debug(LOG.INJECT, `Checking for unhandled messages in transform`, {
         sessionId,
-        undeliveredCount: undelivered.length,
+        unhandledCount: unhandled.length,
       });
 
-      if (undelivered.length === 0) {
+      if (unhandled.length === 0) {
         return;
       }
 
-      log.info(
-        LOG.INJECT,
-        `Injecting ${undelivered.length} assistant message(s) with tool parts`,
-        {
-          sessionId,
-          undeliveredCount: undelivered.length,
-          messageIds: undelivered.map((m) => m.id),
-        },
-      );
+      log.info(LOG.INJECT, `Injecting bundled inbox message`, {
+        sessionId,
+        unhandledCount: unhandled.length,
+        msgIndices: unhandled.map((m) => m.msgIndex),
+      });
 
-      // Inject one assistant message with tool part for each undelivered message
-      for (const msg of undelivered) {
-        const assistantMsg = createAssistantMessageWithToolPart(
-          sessionId,
-          msg.from,
-          msg.body,
-          msg.id,
-          msg.timestamp,
-          lastUserMsg,
-        );
+      // Create ONE bundled message with all pending messages
+      const inboxMsg = createInboxMessage(sessionId, unhandled, lastUserMsg);
 
-        // Cast to allow pushing to messages array
-        output.messages.push(assistantMsg as unknown as UserMessage);
+      // Push at the END of the messages array (recency bias)
+      output.messages.push(inboxMsg as unknown as UserMessage);
 
-        log.info(LOG.INJECT, `Injected assistant message with tool part`, {
-          sessionId,
-          senderAlias: msg.from,
-          messageId: assistantMsg.info.id,
-          partId: assistantMsg.parts[0].id,
-        });
-
-        // Mark as delivered after injection
-        msg.delivered = true;
-      }
-
-      log.info(
-        LOG.INJECT,
-        `Marked ${undelivered.length} messages as delivered after injection`,
-        {
-          sessionId,
-        },
-      );
+      log.info(LOG.INJECT, `Injected inbox at end of message chain`, {
+        sessionId,
+        messageCount: unhandled.length,
+      });
     },
 
     // Add broadcast to subagent_tools
