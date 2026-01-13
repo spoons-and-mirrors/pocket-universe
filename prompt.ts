@@ -34,12 +34,13 @@ export function broadcastResult(
   alias: string,
   recipients: string[],
   parallelAgents: ParallelAgent[],
-  handledMessages: HandledMessage[]
+  handledMessages: HandledMessage[],
 ): string {
   const lines: string[] = [];
 
-  // Always show identity
+  // Always show identity with self-warning
   lines.push(`YOUR ALIAS: ${alias}`);
+  lines.push(`(Do NOT use "${alias}" as recipient - that's you!)`);
   lines.push(``);
 
   // Show message confirmation
@@ -84,14 +85,14 @@ export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to you
 
 export function broadcastMessageTooLong(
   length: number,
-  maxLength: number
+  maxLength: number,
 ): string {
   return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
 }
 
 export function broadcastUnknownRecipient(
   recipient: string,
-  known: string[]
+  known: string[],
 ): string {
   const list =
     known.length > 0
@@ -118,7 +119,7 @@ export function buildInboxContent(messages: InboxMessage[]): string {
 
   lines.push(`---`);
   lines.push(
-    `Reply: broadcast(recipient="<sender>", reply_to="<id>", message="...")`
+    `Reply: broadcast(recipient="<sender>", reply_to="<id>", message="...")`,
   );
 
   return lines.join("\n");

@@ -25,7 +25,7 @@ const MAX_DESCRIPTION_LENGTH = 100;
 const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes for handled messages
 const UNHANDLED_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for unhandled messages
 const MAX_INBOX_SIZE = 100; // Max messages per inbox
-const PARENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const PARENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes // DORMANT: parent alias feature // DORMANT: parent alias feature
 const CLEANUP_INTERVAL_MS = 60 * 1000; // Run cleanup every minute
 const DEFAULT_MODEL_ID = "gpt-4o-2024-08-06";
 const DEFAULT_PROVIDER_ID = "openai";
@@ -45,6 +45,7 @@ interface Message {
   handled: boolean;
 }
 
+// DORMANT: parent alias feature
 interface CachedParentId {
   value: string | null;
   cachedAt: number;
@@ -55,7 +56,7 @@ interface OpenCodeSessionClient {
   session: {
     get: (params: {
       path: { id: string };
-    }) => Promise<{ data?: { parentID?: string } }>;
+    }) => Promise<{ data?: { parentID?: string } }>; // DORMANT: parent alias feature
   };
 }
 
@@ -148,6 +149,7 @@ const agentDescriptions = new Map<string, string>(); // alias -> description
 let nextAgentIndex = 0;
 const registeringSessionsLock = new Set<string>(); // Prevent race conditions
 
+// DORMANT: parent alias feature
 // Cache for parentID lookups with expiry
 const sessionParentCache = new Map<string, CachedParentId>();
 
@@ -200,6 +202,7 @@ function cleanupExpiredMessages(): void {
     }
   }
 
+  // DORMANT: parent alias feature
   // Cleanup expired parent cache entries
   for (const [sessionId, cached] of sessionParentCache) {
     if (now - cached.cachedAt > PARENT_CACHE_TTL_MS) {
@@ -246,9 +249,10 @@ function getDescription(alias: string): string | undefined {
 
 function resolveAlias(
   aliasOrSessionId: string,
+  // DORMANT: parent alias feature
   parentId?: string | null,
 ): string | undefined {
-  // Handle special "parent" alias
+  // Handle special "parent" alias (DORMANT)
   if (aliasOrSessionId === "parent" && parentId) {
     return parentId;
   }
@@ -402,6 +406,7 @@ function registerSession(sessionId: string): void {
 // Session utils
 // ============================================================================
 
+// DORMANT: parent alias feature
 async function getParentId(
   client: OpenCodeSessionClient,
   sessionId: string,
@@ -657,6 +662,7 @@ const plugin: Plugin = async (ctx) => {
             return broadcastResult(alias, [], parallelAgents, handledMessages);
           }
 
+          // DORMANT: parent alias feature
           const parentId = await getParentId(client, sessionId);
 
           const recipientSessions: string[] = [];
@@ -691,15 +697,12 @@ const plugin: Plugin = async (ctx) => {
             return broadcastResult(alias, [], parallelAgents, handledMessages);
           }
 
+          // DORMANT: parent alias feature
           // Check if we're broadcasting to parent
           const isTargetingParent =
             parentId && recipientSessions.includes(parentId);
 
-          for (const recipientSessionId of recipientSessions) {
-            sendMessage(alias, recipientSessionId, args.message);
-          }
-
-          // Notify parent session if targeted
+          // Notify parent session if targeted (DORMANT)
           if (isTargetingParent) {
             log.info(
               LOG.MESSAGE,
