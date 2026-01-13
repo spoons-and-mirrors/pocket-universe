@@ -28,7 +28,7 @@ export function broadcastResult(
   
   // Always show identity
   lines.push(`YOUR ALIAS: ${alias}`);
-  lines.push(`(Do NOT use "${alias}" as the "to" target - that's YOU!)`);
+  lines.push(`(Do NOT use "${alias}" as the "recipient" target - that's YOU!)`);
   lines.push(``);
   
   // Show message confirmation
@@ -60,9 +60,9 @@ export function broadcastResult(
 
 export const BROADCAST_MISSING_MESSAGE = `Error: 'message' parameter is required.`;
 
-export function broadcastUnknownRecipient(to: string, known: string[]): string {
+export function broadcastUnknownRecipient(recipient: string, known: string[]): string {
   const list = known.length > 0 ? `Known agents: ${known.join(", ")}` : "No agents available yet.";
-  return `Error: Unknown recipient "${to}". ${list}`;
+  return `Error: Unknown recipient "${recipient}". ${list}`;
 }
 
 // =============================================================================
@@ -89,31 +89,3 @@ When you complete your task, broadcast to all: "Done. Here's what I found/did: .
 </instructions>
 `;
 
-// =============================================================================
-// Urgent notification injection (kept for potential future use)
-// =============================================================================
-
-export interface UnreadMessage {
-  from: string;
-  body: string;
-  timestamp: number;
-}
-
-export function urgentNotification(messages: UnreadMessage[]): string {
-  const lines = [
-    `<system-reminder priority="critical">`,
-    `URGENT: You have ${messages.length} unread message(s) from other agents.`,
-    ``,
-  ];
-  
-  for (const msg of messages) {
-    lines.push(`From: ${msg.from}`);
-    lines.push(`Message: ${msg.body}`);
-    lines.push(``);
-  }
-  
-  lines.push(`Respond NOW using: broadcast(to="<sender>", message="<your response>")`);
-  lines.push(`</system-reminder>`);
-  
-  return lines.join("\n");
-}
