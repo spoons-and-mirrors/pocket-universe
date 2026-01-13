@@ -7,10 +7,8 @@ import {
   broadcastMessageTooLong,
   broadcastUnknownRecipient,
   broadcastResult,
-  buildInboxContent,
   SYSTEM_PROMPT,
   type ParallelAgent,
-  type InboxMessage,
   type HandledMessage,
 } from "./prompt";
 import { log, LOG } from "./logger";
@@ -363,7 +361,9 @@ function getKnownAliases(sessionId: string): string[] {
 function getParallelAgents(sessionId: string): ParallelAgent[] {
   const selfAlias = sessionToAlias.get(sessionId);
   const agents: ParallelAgent[] = [];
-  for (const alias of aliasToSession.keys()) {
+  for (const [alias, sessId] of aliasToSession.entries()) {
+    // All registered sessions are child sessions (we check parentID before registering)
+    // Just exclude self
     if (alias !== selfAlias) {
       agents.push({
         alias,
@@ -488,14 +488,12 @@ function createInboxMessage(
   const now = Date.now();
   const userInfo = baseUserMessage.info;
 
-  const inboxMsgs: InboxMessage[] = messages.map((m) => ({
+  // Build structured array of messages (not a string blob)
+  const inboxMsgs = messages.map((m) => ({
     id: m.msgIndex,
     from: m.from,
     body: m.body,
-    timestamp: m.timestamp,
   }));
-
-  const content = buildInboxContent(inboxMsgs);
 
   const assistantMessageId = `msg_broadcast_${now}`;
   const partId = `prt_broadcast_${now}`;
@@ -537,9 +535,9 @@ function createInboxMessage(
         tool: "broadcast",
         state: {
           status: "completed",
-          input: { message: content },
-          output: `Received ${messages.length} message(s)`,
-          title: `📨 Inbox (${messages.length} messages)`,
+          input: { messages: inboxMsgs },
+          output: `${messages.length} message(s)`,
+          title: `Inbox (${messages.length} messages)`,
           metadata: {
             incoming_message: true,
             message_count: messages.length,
@@ -576,11 +574,9 @@ const plugin: Plugin = async (ctx) => {
             .describe("Target agent(s), comma-separated. Omit to send to all."),
           message: tool.schema.string().describe("Your message"),
           reply_to: tool.schema
-            .string()
+            .array(tool.schema.number())
             .optional()
-            .describe(
-              "Comma-separated message IDs to mark as handled (e.g., '1,2,3')",
-            ),
+            .describe("Message IDs to mark as handled (e.g., [1, 2, 3])"),
         },
         async execute(args, context: ToolContext) {
           const sessionId = context.sessionID;
@@ -624,20 +620,13 @@ const plugin: Plugin = async (ctx) => {
 
           // Handle reply_to - mark messages as handled
           let handledMessages: HandledMessage[] = [];
-          if (args.reply_to) {
-            const msgIndices = args.reply_to
-              .split(",")
-              .map((s) => parseInt(s.trim(), 10))
-              .filter((n) => !isNaN(n));
-
-            if (msgIndices.length > 0) {
-              handledMessages = markMessagesAsHandled(sessionId, msgIndices);
-              log.info(LOG.TOOL, `Handled messages via reply_to`, {
-                alias,
-                requested: msgIndices,
-                actuallyHandled: handledMessages.length,
-              });
-            }
+          if (args.reply_to && args.reply_to.length > 0) {
+            handledMessages = markMessagesAsHandled(sessionId, args.reply_to);
+            log.info(LOG.TOOL, `Handled messages via reply_to`, {
+              alias,
+              requested: args.reply_to,
+              actuallyHandled: handledMessages.length,
+            });
           }
 
           const knownAgents = getKnownAliases(sessionId);
@@ -771,6 +760,7 @@ const plugin: Plugin = async (ctx) => {
     },
 
     // PRE-REGISTER agents on first LLM call + inject system prompt
+    // Only register child sessions (those with parentID)
     "experimental.chat.system.transform": async (
       input: SystemTransformInput,
       output: SystemTransformOutput,
@@ -784,7 +774,28 @@ const plugin: Plugin = async (ctx) => {
         return;
       }
 
-      // Register session early - before agent even calls broadcast
+      // Check if this is a child session (has parentID)
+      try {
+        const result = await client.session.get({ path: { id: sessionId } });
+        if (!result.data?.parentID) {
+          log.debug(
+            LOG.INJECT,
+            `Session has no parentID (main session), skipping IAM`,
+            {
+              sessionId,
+            },
+          );
+          return;
+        }
+      } catch (e) {
+        log.debug(LOG.INJECT, `Failed to get session info, skipping IAM`, {
+          sessionId,
+          error: String(e),
+        });
+        return;
+      }
+
+      // Register child session early - before agent even calls broadcast
       registerSession(sessionId);
 
       // Inject IAM instructions
@@ -818,11 +829,12 @@ const plugin: Plugin = async (ctx) => {
       const sessionId = lastUserMsg.info.sessionID;
       const unhandled = getUnhandledMessages(sessionId);
 
-      log.debug(LOG.INJECT, `Checking for unhandled messages in transform`, {
+      log.debug(LOG.INJECT, `Checking for messages in transform`, {
         sessionId,
         unhandledCount: unhandled.length,
       });
 
+      // Only inject if there are messages to show
       if (unhandled.length === 0) {
         return;
       }

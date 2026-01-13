@@ -1,10 +1,12 @@
 # IAM (Inter-Agent Messaging)
 
-Enable parallel agents to communicate with each other in OpenCode.
+Enable parallel agents communication for opencode
+
+`@spoons-and-mirrors/iam@latest`
 
 ## How It Works
 
-When you spawn multiple agents with the Task tool, they can send messages to each other using `broadcast`. Messages appear in each agent's context automatically.
+Parallel agents they can send messages to each other using the `broadcast` tool. Messages are relayed to the proper agent's context.
 
 ```mermaid
 sequenceDiagram
@@ -22,7 +24,7 @@ sequenceDiagram
     Note over B: Receives message
     Note over B: Responds
 
-    B->>A: broadcast(recipient="agentA", reply_to="1", message="Answer!")
+    B->>A: broadcast(recipient="agentA", reply_to=[1], message="Answer!")
 
     Note over A: Receives reply
     Note over B: Tool output shows both reply and handled message
@@ -32,36 +34,35 @@ sequenceDiagram
 ## The `broadcast` Tool
 
 ```
-broadcast(message="...")                              # Send to all agents
-broadcast(recipient="agentB", message="...")          # Send to specific agent
-broadcast(reply_to="1,2", message="...")              # Mark messages as handled
-broadcast(recipient="agentA", reply_to="1", message="...") # Reply and mark handled
+broadcast(message="...")                                 # Send to all agents
+broadcast(recipient="agentB", message="...")             # Send to specific agent
+broadcast(reply_to=[1, 2], message="...")                # Mark messages as handled
+broadcast(recipient="agentA", reply_to=[1], message="...") # Reply and mark handled
 ```
 
 ### Parameters
 
-| Parameter   | Required | Description                                               |
-| ----------- | -------- | --------------------------------------------------------- |
-| `message`   | Yes      | Your message content                                      |
-| `recipient` | No       | Target agent(s), comma-separated. Omit to send to all     |
-| `reply_to`  | No       | Message IDs to mark as handled (e.g., `"1"` or `"1,2,3"`) |
+| Parameter   | Required | Description                                                          |
+| ----------- | -------- | -------------------------------------------------------------------- |
+| `message`   | Yes      | Your message content                                                 |
+| `recipient` | No       | Target agent(s), comma-separated. Omit to send to all                |
+| `reply_to`  | No       | Array of message IDs to mark as handled (e.g., `[1]` or `[1, 2, 3]`) |
 
 ## Receiving Messages
 
-Messages appear in an agent's context as a bundled inbox:
+Messages appear as a `broadcast` tool result with structured data:
 
+```json
+{
+  "messages": [
+    { "id": 1, "from": "agentA", "body": "What's the status on the API?" },
+    { "id": 2, "from": "agentA", "body": "Also, can you check the tests?" }
+  ],
+  "agents": ["agentA", "agentC: Working on backend"]
+}
 ```
-INCOMING MESSAGES (2)
 
---- Message #1 from agentA ---
-What's the status on the API?
-
---- Message #2 from agentA ---
-Also, can you check the tests?
-
----
-To respond: broadcast(recipient="agentA", reply_to="1,2", message="...")
-```
+The `agents` array always shows available agents to message. This is injected even when there are no incoming messages.
 
 Messages persist in the inbox until the agent marks them as handled using `reply_to`.
 
@@ -69,13 +70,9 @@ Messages persist in the inbox until the agent marks them as handled using `reply
 
 Add to your OpenCode config:
 
-```yaml
-plugins:
-  - name: iam
-    module: "@spoons-and-mirrors/iam"
 ```
-
-The plugin automatically makes `broadcast` available to all task agents.
+"plugin": ["@spoons-and-mirrors/iam@latest"]
+```
 
 ## Example Workflow
 
@@ -90,11 +87,11 @@ AgentA (working on frontend):
 AgentB (working on backend):
   → broadcast(message="Starting backend work")
   → ... sees AgentA's question in inbox ...
-  → broadcast(recipient="agentA", reply_to="1", message="Here's the schema: {...}")
+  → broadcast(recipient="agentA", reply_to=[1], message="Here's the schema: {...}")
 
 AgentA:
   → ... sees AgentB's response in inbox ...
-  → broadcast(reply_to="1", message="Got it, thanks!")
+  → broadcast(reply_to=[1], message="Got it, thanks!")
 ```
 
 ## Notes

@@ -13,13 +13,6 @@ export interface ParallelAgent {
   description?: string;
 }
 
-export interface InboxMessage {
-  id: number; // Numeric ID for easy reference
-  from: string;
-  body: string;
-  timestamp: number;
-}
-
 export interface HandledMessage {
   id: number;
   from: string;
@@ -34,46 +27,45 @@ export function broadcastResult(
   alias: string,
   recipients: string[],
   parallelAgents: ParallelAgent[],
-  handledMessages: HandledMessage[]
+  handledMessages: HandledMessage[],
 ): string {
   const lines: string[] = [];
 
-  // Always show identity with self-warning
-  lines.push(`YOUR ALIAS: ${alias}`);
-  lines.push(`(Do NOT use "${alias}" as recipient - that's you!)`);
+  // Identity first
+  lines.push(`You are: ${alias}`);
   lines.push(``);
 
-  // Show message confirmation
+  // AGENTS LIST AT THE TOP - most important info
+  if (parallelAgents.length > 0) {
+    lines.push(`Available agents to message:`);
+    for (const agent of parallelAgents) {
+      if (agent.description) {
+        lines.push(`  - ${agent.alias}: ${agent.description}`);
+      } else {
+        lines.push(`  - ${agent.alias}`);
+      }
+    }
+  } else {
+    lines.push(`No other agents available yet.`);
+  }
+
+  // Message confirmation
   if (recipients.length > 0) {
+    lines.push(``);
     const recipientStr =
       recipients.length === 1 ? recipients[0] : recipients.join(", ");
     lines.push(`Message sent to: ${recipientStr}`);
   }
 
-  // Show handled messages with their content (so LLM knows what it replied to)
+  // Show handled messages
   if (handledMessages.length > 0) {
     lines.push(``);
-    lines.push(`--- Replied to ${handledMessages.length} message(s) ---`);
+    lines.push(`Marked as handled: ${handledMessages.length} message(s)`);
     for (const msg of handledMessages) {
       const preview =
         msg.body.length > 80 ? msg.body.substring(0, 80) + "..." : msg.body;
-      lines.push(`#${msg.id} from ${msg.from}: "${preview}"`);
+      lines.push(`  #${msg.id} from ${msg.from}: "${preview}"`);
     }
-  }
-
-  // Show other agents
-  lines.push(``);
-  if (parallelAgents.length > 0) {
-    lines.push(`--- Other Agents ---`);
-    for (const agent of parallelAgents) {
-      if (agent.description) {
-        lines.push(`- ${agent.alias}: ${agent.description}`);
-      } else {
-        lines.push(`- ${agent.alias}`);
-      }
-    }
-  } else {
-    lines.push(`No other agents registered yet.`);
   }
 
   return lines.join("\n");
@@ -85,14 +77,14 @@ export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to you
 
 export function broadcastMessageTooLong(
   length: number,
-  maxLength: number
+  maxLength: number,
 ): string {
   return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
 }
 
 export function broadcastUnknownRecipient(
   recipient: string,
-  known: string[]
+  known: string[],
 ): string {
   const list =
     known.length > 0
@@ -100,30 +92,6 @@ export function broadcastUnknownRecipient(
       : "No agents available yet.";
   return `Error: Unknown recipient "${recipient}". ${list}`;
 }
-
-// =============================================================================
-// Inbox message bundle (injected into context)
-// =============================================================================
-
-export function buildInboxContent(messages: InboxMessage[]): string {
-   const lines: string[] = [];
-
-   lines.push(`INCOMING MESSAGES (${messages.length})`);
-   lines.push(``);
-
-   for (const msg of messages) {
-     lines.push(`--- Message #${msg.id} from ${msg.from} ---`);
-     lines.push(msg.body);
-     lines.push(``);
-   }
-
-   lines.push(`---`);
-   lines.push(
-     `Reply: broadcast(recipient="<sender>", reply_to="<id>", message="...")`
-   );
-
-   return lines.join("\n");
- }
 
 // =============================================================================
 // System prompt injection
@@ -135,18 +103,21 @@ export const SYSTEM_PROMPT = `
 
 Use \`broadcast\` to communicate with other parallel agents.
 
-## First Broadcast = Your Status
-Your first broadcast message becomes your permanent status visible to all other agents.
-Make it a clear, descriptive summary of your GLOBAL task. Your first broadcast will use this format \`broadcast(message="...")\` and omit \`recipient\`.
+## IMPORTANT: Broadcast Immediately on Start
+Call \`broadcast(message="...")\` as your FIRST action to announce yourself and discover other agents. The tool result will show all available agents you can message.
 
 ## Sending Messages
 - \`broadcast(message="...")\` → send to all agents
 - \`broadcast(recipient="agentB", message="...")\` → send to specific agent
 
-## Replying to Messages
-Incoming messages appear as \`broadcast\` tool results in your context.
+## Receiving Messages
+Incoming messages appear as \`broadcast\` tool results with a \`messages\` array:
+\`\`\`
+{ messages: [{ id: 1, from: "agentA", body: "..." }, ...] }
+\`\`\`
+
 Use \`reply_to\` to mark messages as handled (they persist until you do):
-- \`broadcast(recipient="agentA", reply_to="1", message="...")\`
-- \`broadcast(recipient="agentA", reply_to="1,2,3", message="...")\` → handle multiple
+- \`broadcast(recipient="agentA", reply_to=[1], message="...")\`
+- \`broadcast(recipient="agentA", reply_to=[1, 2, 3], message="...")\`
 </instructions>
 `;
