@@ -94,23 +94,25 @@ export const SYSTEM_PROMPT = `
 
 Use \`broadcast\` to communicate with other parallel agents.
 
-## IMPORTANT: Broadcast Immediately on Start
-Call \`broadcast(message="...")\` as your FIRST action to announce yourself and discover other agents. The tool result will show all available agents you can message.
+## IMPORTANT: Announce Yourself First
+Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose. The synthetic tool result will show a hint reminding you to announce.
 
 ## Sending Messages
-- \`broadcast(message="...")\` → send to all agents
+- \`broadcast(message="...")\` → announce yourself or send to all agents
 - \`broadcast(recipient="agentB", message="...")\` → send to specific agent
 
 ## Receiving Messages
 Incoming messages appear as synthetic \`broadcast\` tool results:
 \`\`\`
 {
+  hint: "ACTION REQUIRED: Announce yourself...",  // only if you haven't announced
   agents: [{ name: "agentA", status: "Working on X" }],
   messages: [{ id: 1, from: "agentA", content: "..." }]
 }
 \`\`\`
 
-- **agents**: Status announcements (not replyable)
+- **hint**: Disappears after you announce yourself
+- **agents**: Other agents and their status (not replyable)
 - **messages**: Messages you can reply to using \`reply_to\`
 
 Use \`reply_to\` to reply to a message (auto-wires recipient):

@@ -68,6 +68,7 @@ Messages are injected as a synthetic `broadcast` tool result. Here's the complet
     "status": "completed",
     "input": { "synthetic": true },
     "output": {
+      "hint": "ACTION REQUIRED: Announce yourself...",
       "agents": [
         { "name": "agentA", "status": "Working on frontend components" }
       ],
@@ -90,12 +91,13 @@ Messages are injected as a synthetic `broadcast` tool result. Here's the complet
 ```
 
 - **`input.synthetic`**: Indicates this was injected by IAM, not a real agent call
-- **`output.agents`**: Status announcements from other agents (not replyable)
-- **`output.messages`**: Actual messages you can reply to using `reply_to`
+- **`output.hint`**: Shown only if agent hasn't announced yet (disappears after first broadcast)
+- **`output.agents`**: Other agents and their status (not replyable)
+- **`output.messages`**: Messages you can reply to using `reply_to`
 
 Messages persist in the inbox until the agent marks them as handled using `reply_to`.
 
-**Discovery:** Agents discover each other by calling `broadcast` which activates the attention mechanism.
+**Discovery:** Agents discover each other through synthetic injection. The first `broadcast` call sets the agent's status, which other agents see in the `agents` array.
 
 ## Attention Layer
 

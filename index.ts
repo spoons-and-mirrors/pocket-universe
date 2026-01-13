@@ -511,6 +511,7 @@ function createInboxMessage(
   messages: Message[],
   baseUserMessage: UserMessage,
   parallelAgents: ParallelAgent[],
+  hasAnnounced: boolean,
 ): AssistantMessage {
   const now = Date.now();
   const userInfo = baseUserMessage.info;
@@ -519,9 +520,16 @@ function createInboxMessage(
   // Agents section shows available agents and their status (not replyable)
   // Messages section shows replyable messages
   const outputData: {
+    hint?: string;
     agents?: Array<{ name: string; status?: string }>;
     messages?: Array<{ id: number; from: string; content: string }>;
   } = {};
+
+  // Add hint for unannounced agents
+  if (!hasAnnounced) {
+    outputData.hint =
+      'ACTION REQUIRED: Announce yourself to other agents by calling broadcast(message="what you\'re working on")';
+  }
 
   // Build agents section from parallelAgents (status comes from agentDescriptions)
   if (parallelAgents.length > 0) {
@@ -974,11 +982,13 @@ const plugin: Plugin = async (ctx) => {
       });
 
       // Create ONE bundled message with all pending messages
+      const hasAnnounced = announcedSessions.has(sessionId);
       const inboxMsg = createInboxMessage(
         sessionId,
         unhandled,
         lastUserMsg,
         parallelAgents,
+        hasAnnounced,
       );
 
       // Push at the END of the messages array (recency bias)
