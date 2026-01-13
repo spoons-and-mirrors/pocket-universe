@@ -702,6 +702,11 @@ const plugin: Plugin = async (ctx) => {
           const isTargetingParent =
             parentId && recipientSessions.includes(parentId);
 
+          // Send messages to all recipients
+          for (const recipientSessionId of recipientSessions) {
+            sendMessage(alias, recipientSessionId, args.message);
+          }
+
           // Notify parent session if targeted (DORMANT)
           if (isTargetingParent) {
             log.info(
