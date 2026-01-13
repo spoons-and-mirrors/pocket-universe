@@ -22,22 +22,23 @@ export function broadcastResult(
   recipients: string[],
   messageId: string,
   parallelAgents: ParallelAgent[],
-  isFirstCall: boolean
+  isFirstCall: boolean,
 ): string {
   const lines: string[] = [];
-  
+
   // Always show identity
   lines.push(`YOUR ALIAS: ${alias}`);
   lines.push(`(Do NOT use "${alias}" as the "recipient" target - that's YOU!)`);
   lines.push(``);
-  
+
   // Show message confirmation
   if (recipients.length > 0) {
-    const recipientStr = recipients.length === 1 ? recipients[0] : recipients.join(", ");
+    const recipientStr =
+      recipients.length === 1 ? recipients[0] : recipients.join(", ");
     lines.push(`Message sent to: ${recipientStr}`);
     lines.push(`Message ID: ${messageId}`);
   }
-  
+
   // Show other agents (on first call or when useful)
   if (isFirstCall || parallelAgents.length > 0) {
     lines.push(``);
@@ -54,7 +55,7 @@ export function broadcastResult(
       lines.push(`No other agents running yet.`);
     }
   }
-  
+
   return lines.join("\n");
 }
 
@@ -62,12 +63,21 @@ export const BROADCAST_MISSING_MESSAGE = `Error: 'message' parameter is required
 
 export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to yourself. The target alias is your own alias. Choose a different recipient.`;
 
-export function broadcastMessageTooLong(length: number, maxLength: number): string {
+export function broadcastMessageTooLong(
+  length: number,
+  maxLength: number,
+): string {
   return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
 }
 
-export function broadcastUnknownRecipient(recipient: string, known: string[]): string {
-  const list = known.length > 0 ? `Known agents: ${known.join(", ")}` : "No agents available yet.";
+export function broadcastUnknownRecipient(
+  recipient: string,
+  known: string[],
+): string {
+  const list =
+    known.length > 0
+      ? `Known agents: ${known.join(", ")}`
+      : "No agents available yet.";
   return `Error: Unknown recipient "${recipient}". ${list}`;
 }
 
@@ -94,4 +104,3 @@ READ THESE CAREFULLY and respond to any questions they ask!
 When you complete your task, broadcast to all: "Done. Here's what I found/did: ..."
 </instructions>
 `;
-

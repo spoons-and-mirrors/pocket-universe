@@ -1,34 +1,34 @@
-import * as fs from "fs"
-import * as path from "path"
+import * as fs from "fs";
+import * as path from "path";
 
 // =============================================================================
 // Simple file logger for debugging the inbox plugin
 // =============================================================================
 
 // Constants
-const LOG_DIR = path.join(process.cwd(), ".logs")
-const LOG_FILE = path.join(LOG_DIR, "iam.log")
-const WRITE_INTERVAL_MS = 100 // Batch writes every 100ms
+const LOG_DIR = path.join(process.cwd(), ".logs");
+const LOG_FILE = path.join(LOG_DIR, "iam.log");
+const WRITE_INTERVAL_MS = 100; // Batch writes every 100ms
 
 // Async log buffer
-let logBuffer: string[] = []
-let writeScheduled = false
+let logBuffer: string[] = [];
+let writeScheduled = false;
 
 // Ensure log directory exists and clear log file on startup
 try {
   if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true })
+    fs.mkdirSync(LOG_DIR, { recursive: true });
   }
   // Clear log file on each restart
-  fs.writeFileSync(LOG_FILE, "")
+  fs.writeFileSync(LOG_FILE, "");
 } catch {
   // Ignore errors during init
 }
 
-type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR"
+type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 
 function formatTimestamp(): string {
-  return new Date().toISOString()
+  return new Date().toISOString();
 }
 
 /**
@@ -36,16 +36,16 @@ function formatTimestamp(): string {
  */
 async function flushLogs(): Promise<void> {
   if (logBuffer.length === 0) {
-    writeScheduled = false
-    return
+    writeScheduled = false;
+    return;
   }
 
-  const toWrite = logBuffer.join("")
-  logBuffer = []
-  writeScheduled = false
+  const toWrite = logBuffer.join("");
+  logBuffer = [];
+  writeScheduled = false;
 
   try {
-    await fs.promises.appendFile(LOG_FILE, toWrite)
+    await fs.promises.appendFile(LOG_FILE, toWrite);
   } catch {
     // Silently fail if we can't write
   }
@@ -56,18 +56,23 @@ async function flushLogs(): Promise<void> {
  */
 function scheduleFlush(): void {
   if (!writeScheduled) {
-    writeScheduled = true
-    setTimeout(flushLogs, WRITE_INTERVAL_MS)
+    writeScheduled = true;
+    setTimeout(flushLogs, WRITE_INTERVAL_MS);
   }
 }
 
-function writeLog(level: LogLevel, category: string, message: string, data?: unknown): void {
-  const timestamp = formatTimestamp()
-  const dataStr = data !== undefined ? ` | ${JSON.stringify(data)}` : ""
-  const logLine = `[${timestamp}] [${level}] [${category}] ${message}${dataStr}\n`
+function writeLog(
+  level: LogLevel,
+  category: string,
+  message: string,
+  data?: unknown,
+): void {
+  const timestamp = formatTimestamp();
+  const dataStr = data !== undefined ? ` | ${JSON.stringify(data)}` : "";
+  const logLine = `[${timestamp}] [${level}] [${category}] ${message}${dataStr}\n`;
 
-  logBuffer.push(logLine)
-  scheduleFlush()
+  logBuffer.push(logLine);
+  scheduleFlush();
 }
 
 export const log = {
@@ -85,7 +90,7 @@ export const log = {
 
   /** Force immediate flush (useful before process exit) */
   flush: flushLogs,
-}
+};
 
 // Log categories
 export const LOG = {
@@ -94,4 +99,4 @@ export const LOG = {
   SESSION: "SESSION",
   HOOK: "HOOK",
   INJECT: "INJECT",
-} as const
+} as const;

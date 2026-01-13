@@ -21,7 +21,7 @@ parameters:
     type: string
     required: false
     description: "Target agent(s), comma-separated. Omit to send to all."
-  
+
   message:
     type: string
     required: true
@@ -66,6 +66,7 @@ The plugin automatically adds `broadcast` to `experimental.subagent_tools` so it
 ## Logs
 
 Logs are written to `.logs/iam.log` with categories:
+
 - `[HOOK]` - Plugin lifecycle events
 - `[SESSION]` - Agent registration
 - `[TOOL]` - Tool execution
