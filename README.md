@@ -17,8 +17,6 @@ sequenceDiagram
     Parent->>A: spawn task
     Parent->>B: spawn task
 
-    Note over A,B: Registration
-
     A->>A: broadcast(message="Doing X")
     Note over A: Tool result shows agentB is available
 
