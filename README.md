@@ -71,14 +71,22 @@ Messages are injected as a synthetic `broadcast` tool result. Here's the complet
   "tool": "broadcast",
   "state": {
     "status": "completed",
-    "input": {"synthetic": true},
+    "input": { "synthetic": true },
     "output": {
       "agents": [
-        {"name": "agentA", "status": "Working on frontend components"}
+        { "name": "agentA", "status": "Working on frontend components" }
       ],
       "messages": [
-        {"id": 1, "from": "agentA", "content": "What's the status on the API?"},
-        {"id": 2, "from": "agentA", "content": "Also, can you check the tests?"}
+        {
+          "id": 1,
+          "from": "agentA",
+          "content": "What's the status on the API?"
+        },
+        {
+          "id": 2,
+          "from": "agentA",
+          "content": "Also, can you check the tests?"
+        }
       ]
     },
     "title": "1 agent(s), 2 message(s)"

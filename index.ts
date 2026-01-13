@@ -1,5 +1,5 @@
-import type {Plugin} from "@opencode-ai/plugin";
-import {tool} from "@opencode-ai/plugin";
+import type { Plugin } from "@opencode-ai/plugin";
+import { tool } from "@opencode-ai/plugin";
 import {
   BROADCAST_DESCRIPTION,
   BROADCAST_MISSING_MESSAGE,
@@ -10,7 +10,7 @@ import {
   type ParallelAgent,
   type HandledMessage,
 } from "./prompt";
-import {log, LOG} from "./logger";
+import { log, LOG } from "./logger";
 
 // ============================================================================
 // Constants
@@ -53,14 +53,14 @@ interface CachedParentId {
 interface OpenCodeSessionClient {
   session: {
     get: (params: {
-      path: {id: string};
-    }) => Promise<{data?: {parentID?: string}}>; // DORMANT: parent alias feature
+      path: { id: string };
+    }) => Promise<{ data?: { parentID?: string } }>; // DORMANT: parent alias feature
   };
 }
 
 /** Internal client interface (accessed via type assertion) */
 interface InternalClient {
-  post?: (params: {url: string; body: unknown}) => Promise<unknown>;
+  post?: (params: { url: string; body: unknown }) => Promise<unknown>;
 }
 
 /** Message info from OpenCode SDK */
@@ -238,7 +238,7 @@ function setDescription(sessionId: string, description: string): void {
   const alias = getAlias(sessionId);
   const truncated = description.substring(0, MAX_DESCRIPTION_LENGTH);
   agentDescriptions.set(alias, truncated);
-  log.info(LOG.SESSION, `Agent announced`, {alias, description: truncated});
+  log.info(LOG.SESSION, `Agent announced`, { alias, description: truncated });
 }
 
 function getDescription(alias: string): string | undefined {
@@ -248,7 +248,7 @@ function getDescription(alias: string): string | undefined {
 function resolveAlias(
   aliasOrSessionId: string,
   // DORMANT: parent alias feature
-  parentId?: string | null
+  parentId?: string | null,
 ): string | undefined {
   // Handle special "parent" alias (DORMANT)
   if (aliasOrSessionId === "parent" && parentId) {
@@ -287,7 +287,7 @@ function sendMessage(
   from: string,
   to: string,
   body: string,
-  isStatusAnnouncement = false
+  isStatusAnnouncement = false,
 ): Message {
   const message: Message = {
     id: generateId(),
@@ -311,7 +311,7 @@ function sendMessage(
     } else {
       queue.shift();
     }
-    log.warn(LOG.MESSAGE, `Queue full, removed oldest message`, {to});
+    log.warn(LOG.MESSAGE, `Queue full, removed oldest message`, { to });
   }
 
   queue.push(message);
@@ -332,7 +332,7 @@ function getUnhandledMessages(sessionId: string): Message[] {
 
 function markMessagesAsHandled(
   sessionId: string,
-  msgIndices: number[]
+  msgIndices: number[],
 ): HandledMessage[] {
   const queue = getInbox(sessionId);
   const handled: HandledMessage[] = [];
@@ -416,7 +416,7 @@ function registerSession(sessionId: string): void {
 // DORMANT: parent alias feature
 async function getParentId(
   client: OpenCodeSessionClient,
-  sessionId: string
+  sessionId: string,
 ): Promise<string | null> {
   const now = Date.now();
 
@@ -426,10 +426,10 @@ async function getParentId(
   }
 
   try {
-    const response = await client.session.get({path: {id: sessionId}});
+    const response = await client.session.get({ path: { id: sessionId } });
     const parentId = response.data?.parentID || null;
-    sessionParentCache.set(sessionId, {value: parentId, cachedAt: now});
-    log.debug(LOG.SESSION, `Looked up parentID`, {sessionId, parentId});
+    sessionParentCache.set(sessionId, { value: parentId, cachedAt: now });
+    log.debug(LOG.SESSION, `Looked up parentID`, { sessionId, parentId });
     return parentId;
   } catch (e) {
     log.warn(LOG.SESSION, `Failed to get session info`, {
@@ -458,14 +458,14 @@ interface AssistantMessage {
     modelID: string;
     providerID: string;
     mode: string;
-    path: {cwd: string; root: string};
-    time: {created: number; completed: number};
+    path: { cwd: string; root: string };
+    time: { created: number; completed: number };
     cost: number;
     tokens: {
       input: number;
       output: number;
       reasoning: number;
-      cache: {read: number; write: number};
+      cache: { read: number; write: number };
     };
     variant?: unknown;
   };
@@ -482,7 +482,7 @@ interface AssistantMessage {
       output: string;
       title: string;
       metadata: Record<string, unknown>;
-      time: {start: number; end: number};
+      time: { start: number; end: number };
     };
   }>;
 }
@@ -490,7 +490,7 @@ interface AssistantMessage {
 function createInboxMessage(
   sessionId: string,
   messages: Message[],
-  baseUserMessage: UserMessage
+  baseUserMessage: UserMessage,
 ): AssistantMessage {
   const now = Date.now();
   const userInfo = baseUserMessage.info;
@@ -503,8 +503,8 @@ function createInboxMessage(
   // Status announcements go in "agents" section (not replyable)
   // Regular messages go in "messages" section (replyable via reply_to)
   const outputData: {
-    agents?: Array<{name: string; status: string}>;
-    messages?: Array<{id: number; from: string; content: string}>;
+    agents?: Array<{ name: string; status: string }>;
+    messages?: Array<{ id: number; from: string; content: string }>;
   } = {};
 
   if (statusAnnouncements.length > 0) {
@@ -556,14 +556,14 @@ function createInboxMessage(
       modelID: userInfo.model?.modelID || DEFAULT_MODEL_ID,
       providerID: userInfo.model?.providerID || DEFAULT_PROVIDER_ID,
       mode: "default",
-      path: {cwd: "/", root: "/"},
-      time: {created: now, completed: now},
+      path: { cwd: "/", root: "/" },
+      time: { created: now, completed: now },
       cost: 0,
       tokens: {
         input: 0,
         output: 0,
         reasoning: 0,
-        cache: {read: 0, write: 0},
+        cache: { read: 0, write: 0 },
       },
     },
     parts: [
@@ -576,7 +576,7 @@ function createInboxMessage(
         tool: "broadcast",
         state: {
           status: "completed",
-          input: {synthetic: true}, // Hints this was injected by IAM, not a real agent call
+          input: { synthetic: true }, // Hints this was injected by IAM, not a real agent call
           output,
           title,
           metadata: {
@@ -584,7 +584,7 @@ function createInboxMessage(
             message_count: regularMessages.length,
             status_count: statusAnnouncements.length,
           },
-          time: {start: now, end: now},
+          time: { start: now, end: now },
         },
       },
     ],
@@ -630,7 +630,7 @@ const plugin: Plugin = async (ctx) => {
           const alias = getAlias(sessionId);
 
           if (!args.message) {
-            log.warn(LOG.TOOL, `broadcast missing 'message'`, {alias});
+            log.warn(LOG.TOOL, `broadcast missing 'message'`, { alias });
             return BROADCAST_MISSING_MESSAGE;
           }
 
@@ -683,7 +683,7 @@ const plugin: Plugin = async (ctx) => {
               alias,
               knownAgents,
               parallelAgents,
-              undefined
+              undefined,
             );
           }
 
@@ -705,7 +705,7 @@ const plugin: Plugin = async (ctx) => {
                     alias,
                     providedRecipient: args.recipient,
                     autoWiredRecipient: autoRecipient,
-                  }
+                  },
                 );
               }
 
@@ -789,11 +789,11 @@ const plugin: Plugin = async (ctx) => {
             log.info(
               LOG.MESSAGE,
               `Broadcasting to parent session, calling notify_once`,
-              {sessionId, parentId}
+              { sessionId, parentId },
             );
             try {
               const internalClient = (
-                client as unknown as {_client?: InternalClient}
+                client as unknown as { _client?: InternalClient }
               )._client;
               if (internalClient?.post) {
                 await internalClient.post({
@@ -818,7 +818,7 @@ const plugin: Plugin = async (ctx) => {
             alias,
             validTargets,
             parallelAgents,
-            handledMessage
+            handledMessage,
           );
         },
       }),
@@ -827,7 +827,7 @@ const plugin: Plugin = async (ctx) => {
     // Register subagents when task tool completes (backup registration)
     "tool.execute.after": async (
       input: ToolExecuteInput,
-      output: ToolExecuteOutput
+      output: ToolExecuteOutput,
     ) => {
       log.debug(LOG.HOOK, `tool.execute.after fired`, {
         tool: input.tool,
@@ -851,27 +851,27 @@ const plugin: Plugin = async (ctx) => {
     // Only register child sessions (those with parentID)
     "experimental.chat.system.transform": async (
       input: SystemTransformInput,
-      output: SystemTransformOutput
+      output: SystemTransformOutput,
     ) => {
       const sessionId = input.sessionID;
       if (!sessionId) {
         log.debug(
           LOG.INJECT,
-          `No sessionID in system.transform input, skipping`
+          `No sessionID in system.transform input, skipping`,
         );
         return;
       }
 
       // Check if this is a child session (has parentID)
       try {
-        const result = await client.session.get({path: {id: sessionId}});
+        const result = await client.session.get({ path: { id: sessionId } });
         if (!result.data?.parentID) {
           log.debug(
             LOG.INJECT,
             `Session has no parentID (main session), skipping IAM`,
             {
               sessionId,
-            }
+            },
           );
           return;
         }
@@ -894,14 +894,14 @@ const plugin: Plugin = async (ctx) => {
         {
           sessionId,
           alias: getAlias(sessionId),
-        }
+        },
       );
     },
 
     // Inject ONE bundled inbox message at the END of the chain
     "experimental.chat.messages.transform": async (
       _input: unknown,
-      output: MessagesTransformOutput
+      output: MessagesTransformOutput,
     ) => {
       const lastUserMsg = [...output.messages]
         .reverse()
@@ -909,7 +909,7 @@ const plugin: Plugin = async (ctx) => {
       if (!lastUserMsg) {
         log.debug(
           LOG.INJECT,
-          `No user message found in transform, skipping IAM injection`
+          `No user message found in transform, skipping IAM injection`,
         );
         return;
       }
@@ -948,7 +948,7 @@ const plugin: Plugin = async (ctx) => {
     // Add broadcast to subagent_tools
     "experimental.config.transform": async (
       _input: unknown,
-      output: ConfigTransformOutput
+      output: ConfigTransformOutput,
     ) => {
       const experimental = output.experimental ?? {};
       const existingSubagentTools = experimental.subagent_tools ?? [];
