@@ -2,7 +2,7 @@
 // All LLM-facing prompts for the iam plugin
 // =============================================================================
 
-export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'recipient' for specific agent(s), or omit to message all. Use 'reply_to' to mark messages as handled.`;
+export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Your first broadcast sets your status visible to others - make it a clear summary of your task. Use 'recipient' for specific agent(s), or omit to message all. Use 'reply_to' to mark messages as handled.`;
 
 // =============================================================================
 // Types
@@ -34,7 +34,7 @@ export function broadcastResult(
   alias: string,
   recipients: string[],
   parallelAgents: ParallelAgent[],
-  handledMessages: HandledMessage[],
+  handledMessages: HandledMessage[]
 ): string {
   const lines: string[] = [];
 
@@ -84,14 +84,14 @@ export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to you
 
 export function broadcastMessageTooLong(
   length: number,
-  maxLength: number,
+  maxLength: number
 ): string {
   return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
 }
 
 export function broadcastUnknownRecipient(
   recipient: string,
-  known: string[],
+  known: string[]
 ): string {
   const list =
     known.length > 0
@@ -118,7 +118,7 @@ export function buildInboxContent(messages: InboxMessage[]): string {
 
   lines.push(`---`);
   lines.push(
-    `Reply: broadcast(recipient="<sender>", reply_to="<id>", message="...")`,
+    `Reply: broadcast(recipient="<sender>", reply_to="<id>", message="...")`
   );
 
   return lines.join("\n");
@@ -134,6 +134,10 @@ export const SYSTEM_PROMPT = `
 
 Use \`broadcast\` to communicate with other parallel agents.
 
+## First Broadcast = Your Status
+Your first broadcast message becomes your permanent status visible to all other agents.
+Make it a clear, descriptive summary of your GLOBAL task (e.g., "Implementing auth middleware and JWT validation" not just "Starting work").
+
 ## Sending Messages
 - \`broadcast(message="...")\` → send to all agents
 - \`broadcast(recipient="agentB", message="...")\` → send to specific agent
@@ -143,6 +147,6 @@ Incoming messages appear as an \`iam_inbox\` tool result with numbered messages.
 Use \`reply_to\` to mark messages as handled and remove them from your inbox:
 - \`broadcast(recipient="agentA", reply_to="1", message="...")\`
 
-Unhandled messages will keep appearing until you reply_to them.
+Unhandled messages persist until you reply_to them.
 </instructions>
 `;

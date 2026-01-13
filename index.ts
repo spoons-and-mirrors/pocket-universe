@@ -24,7 +24,7 @@ const ALPHABET_SIZE = 26;
 const MAX_DESCRIPTION_LENGTH = 100;
 const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes for handled messages
 const UNHANDLED_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for unhandled messages
-const MAX_QUEUE_SIZE = 100; // Max messages per queue
+const MAX_INBOX_SIZE = 100; // Max messages per inbox
 const PARENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const CLEANUP_INTERVAL_MS = 60 * 1000; // Run cleanup every minute
 const DEFAULT_MODEL_ID = "gpt-4o-2024-08-06";
@@ -35,7 +35,7 @@ const MAX_MESSAGE_LENGTH = 10000; // Prevent excessively long messages
 // Types
 // ============================================================================
 
-interface PendingMessage {
+interface Message {
   id: string; // Internal ID (random string)
   msgIndex: number; // Numeric index for display (1-based, per session)
   from: string;
@@ -130,8 +130,8 @@ interface ConfigTransformOutput {
 // In-memory message store
 // ============================================================================
 
-// Pending messages indexed by recipient session ID
-const pendingMessages = new Map<string, PendingMessage[]>();
+// Inboxes indexed by recipient session ID
+const inboxes = new Map<string, Message[]>();
 
 // Message index counter per session (for numeric IDs)
 const sessionMsgCounter = new Map<string, number>();
@@ -159,11 +159,11 @@ function cleanupExpiredMessages(): void {
   const now = Date.now();
   let totalRemoved = 0;
 
-  for (const [sessionId, messages] of pendingMessages) {
+  for (const [sessionId, messages] of inboxes) {
     const before = messages.length;
 
     // Remove expired messages based on handled status
-    const filtered = messages.filter((m: PendingMessage) => {
+    const filtered = messages.filter((m: Message) => {
       if (m.handled) {
         return now - m.timestamp < MESSAGE_TTL_MS;
       }
@@ -172,35 +172,31 @@ function cleanupExpiredMessages(): void {
     });
 
     // Trim to max size if needed
-    if (filtered.length > MAX_QUEUE_SIZE) {
-      const unhandled = filtered.filter((m: PendingMessage) => !m.handled);
-      const handled = filtered.filter((m: PendingMessage) => m.handled);
-      handled.sort(
-        (a: PendingMessage, b: PendingMessage) => b.timestamp - a.timestamp,
-      );
+    if (filtered.length > MAX_INBOX_SIZE) {
+      const unhandled = filtered.filter((m: Message) => !m.handled);
+      const handled = filtered.filter((m: Message) => m.handled);
+      handled.sort((a: Message, b: Message) => b.timestamp - a.timestamp);
 
-      if (unhandled.length > MAX_QUEUE_SIZE) {
-        unhandled.sort(
-          (a: PendingMessage, b: PendingMessage) => b.timestamp - a.timestamp,
-        );
-        pendingMessages.set(sessionId, unhandled.slice(0, MAX_QUEUE_SIZE));
-        totalRemoved += before - MAX_QUEUE_SIZE;
+      if (unhandled.length > MAX_INBOX_SIZE) {
+        unhandled.sort((a: Message, b: Message) => b.timestamp - a.timestamp);
+        inboxes.set(sessionId, unhandled.slice(0, MAX_INBOX_SIZE));
+        totalRemoved += before - MAX_INBOX_SIZE;
       } else {
         const kept = [
           ...unhandled,
-          ...handled.slice(0, MAX_QUEUE_SIZE - unhandled.length),
+          ...handled.slice(0, MAX_INBOX_SIZE - unhandled.length),
         ];
-        pendingMessages.set(sessionId, kept);
+        inboxes.set(sessionId, kept);
         totalRemoved += before - kept.length;
       }
     } else {
-      pendingMessages.set(sessionId, filtered);
+      inboxes.set(sessionId, filtered);
       totalRemoved += before - filtered.length;
     }
 
     // Remove empty queues
-    if (pendingMessages.get(sessionId)!.length === 0) {
-      pendingMessages.delete(sessionId);
+    if (inboxes.get(sessionId)!.length === 0) {
+      inboxes.delete(sessionId);
     }
   }
 
@@ -274,19 +270,19 @@ function getNextMsgIndex(sessionId: string): number {
   return next;
 }
 
-function getMessageQueue(sessionId: string): PendingMessage[] {
-  if (!pendingMessages.has(sessionId)) {
-    pendingMessages.set(sessionId, []);
+function getInbox(sessionId: string): Message[] {
+  if (!inboxes.has(sessionId)) {
+    inboxes.set(sessionId, []);
   }
-  return pendingMessages.get(sessionId)!;
+  return inboxes.get(sessionId)!;
 }
 
 // ============================================================================
 // Core messaging functions
 // ============================================================================
 
-function sendMessage(from: string, to: string, body: string): PendingMessage {
-  const message: PendingMessage = {
+function sendMessage(from: string, to: string, body: string): Message {
+  const message: Message = {
     id: generateId(),
     msgIndex: getNextMsgIndex(to),
     from,
@@ -296,10 +292,10 @@ function sendMessage(from: string, to: string, body: string): PendingMessage {
     handled: false,
   };
 
-  const queue = getMessageQueue(to);
+  const queue = getInbox(to);
 
   // Enforce max queue size
-  if (queue.length >= MAX_QUEUE_SIZE) {
+  if (queue.length >= MAX_INBOX_SIZE) {
     // Remove oldest handled message, or oldest message if all unhandled
     const handledIndex = queue.findIndex((m) => m.handled);
     if (handledIndex !== -1) {
@@ -321,15 +317,15 @@ function sendMessage(from: string, to: string, body: string): PendingMessage {
   return message;
 }
 
-function getUnhandledMessages(sessionId: string): PendingMessage[] {
-  return getMessageQueue(sessionId).filter((m) => !m.handled);
+function getUnhandledMessages(sessionId: string): Message[] {
+  return getInbox(sessionId).filter((m) => !m.handled);
 }
 
 function markMessagesAsHandled(
   sessionId: string,
   msgIndices: number[],
 ): HandledMessage[] {
-  const queue = getMessageQueue(sessionId);
+  const queue = getInbox(sessionId);
   const handled: HandledMessage[] = [];
   for (const msg of queue) {
     if (msgIndices.includes(msg.msgIndex) && !msg.handled) {
@@ -481,7 +477,7 @@ interface AssistantMessage {
 
 function createInboxMessage(
   sessionId: string,
-  messages: PendingMessage[],
+  messages: Message[],
   baseUserMessage: UserMessage,
 ): AssistantMessage {
   const now = Date.now();
