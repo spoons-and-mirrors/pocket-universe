@@ -29,7 +29,7 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@opencode-ai/plugin": ">=0.13.7"
+    "@opencode-ai/plugin": "^1.0.0"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "^1.0.143",

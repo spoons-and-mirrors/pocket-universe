@@ -60,6 +60,12 @@ export function broadcastResult(
 
 export const BROADCAST_MISSING_MESSAGE = `Error: 'message' parameter is required.`;
 
+export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to yourself. The target alias is your own alias. Choose a different recipient.`;
+
+export function broadcastMessageTooLong(length: number, maxLength: number): string {
+  return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
+}
+
 export function broadcastUnknownRecipient(recipient: string, known: string[]): string {
   const list = known.length > 0 ? `Known agents: ${known.join(", ")}` : "No agents available yet.";
   return `Error: Unknown recipient "${recipient}". ${list}`;

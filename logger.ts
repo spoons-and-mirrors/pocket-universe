@@ -5,8 +5,14 @@ import * as path from "path"
 // Simple file logger for debugging the inbox plugin
 // =============================================================================
 
+// Constants
 const LOG_DIR = path.join(process.cwd(), ".logs")
 const LOG_FILE = path.join(LOG_DIR, "iam.log")
+const WRITE_INTERVAL_MS = 100 // Batch writes every 100ms
+
+// Async log buffer
+let logBuffer: string[] = []
+let writeScheduled = false
 
 // Ensure log directory exists and clear log file on startup
 try {
@@ -25,30 +31,60 @@ function formatTimestamp(): string {
   return new Date().toISOString()
 }
 
-function writeLog(level: LogLevel, category: string, message: string, data?: unknown): void {
-  const timestamp = formatTimestamp()
-  const dataStr = data !== undefined ? ` | ${JSON.stringify(data)}` : ""
-  const logLine = `[${timestamp}] [${level}] [${category}] ${message}${dataStr}\n`
-  
+/**
+ * Flush buffered logs to file asynchronously
+ */
+async function flushLogs(): Promise<void> {
+  if (logBuffer.length === 0) {
+    writeScheduled = false
+    return
+  }
+
+  const toWrite = logBuffer.join("")
+  logBuffer = []
+  writeScheduled = false
+
   try {
-    fs.appendFileSync(LOG_FILE, logLine)
+    await fs.promises.appendFile(LOG_FILE, toWrite)
   } catch {
     // Silently fail if we can't write
   }
 }
 
+/**
+ * Schedule a batched write if not already scheduled
+ */
+function scheduleFlush(): void {
+  if (!writeScheduled) {
+    writeScheduled = true
+    setTimeout(flushLogs, WRITE_INTERVAL_MS)
+  }
+}
+
+function writeLog(level: LogLevel, category: string, message: string, data?: unknown): void {
+  const timestamp = formatTimestamp()
+  const dataStr = data !== undefined ? ` | ${JSON.stringify(data)}` : ""
+  const logLine = `[${timestamp}] [${level}] [${category}] ${message}${dataStr}\n`
+
+  logBuffer.push(logLine)
+  scheduleFlush()
+}
+
 export const log = {
-  debug: (category: string, message: string, data?: unknown) => 
+  debug: (category: string, message: string, data?: unknown) =>
     writeLog("DEBUG", category, message, data),
-  
-  info: (category: string, message: string, data?: unknown) => 
+
+  info: (category: string, message: string, data?: unknown) =>
     writeLog("INFO", category, message, data),
-  
-  warn: (category: string, message: string, data?: unknown) => 
+
+  warn: (category: string, message: string, data?: unknown) =>
     writeLog("WARN", category, message, data),
-  
-  error: (category: string, message: string, data?: unknown) => 
+
+  error: (category: string, message: string, data?: unknown) =>
     writeLog("ERROR", category, message, data),
+
+  /** Force immediate flush (useful before process exit) */
+  flush: flushLogs,
 }
 
 // Log categories
