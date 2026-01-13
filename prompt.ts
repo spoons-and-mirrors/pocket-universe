@@ -2,7 +2,7 @@
 // All LLM-facing prompts for the iam plugin
 // =============================================================================
 
-export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'recipient' for specific agent(s), or omit to message all. Use 'reply_to' to mark messages as handled.`;
+export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'recipient' for a specific agent, or omit to message all. Use 'reply_to' to reply (auto-wires recipient to sender).`;
 
 // =============================================================================
 // Types
@@ -77,13 +77,6 @@ export const BROADCAST_MISSING_MESSAGE = `Error: 'message' parameter is required
 
 export const BROADCAST_SELF_MESSAGE = `Warning: You cannot send a message to yourself. The target alias is your own alias. Choose a different recipient.`;
 
-export function broadcastMessageTooLong(
-  length: number,
-  maxLength: number,
-): string {
-  return `Error: Message too long (${length} chars). Maximum allowed: ${maxLength} chars.`;
-}
-
 export function broadcastUnknownRecipient(
   recipient: string,
   known: string[],
@@ -113,12 +106,18 @@ Call \`broadcast(message="...")\` as your FIRST action to announce yourself and 
 - \`broadcast(recipient="agentB", message="...")\` → send to specific agent
 
 ## Receiving Messages
-Incoming messages appear as \`broadcast\` tool results with a \`messages\` array:
+Incoming messages appear as synthetic \`broadcast\` tool results:
 \`\`\`
-{ messages: [{ id: 1, from: "agentA", body: "..." }, ...] }
+{
+  agents: [{ name: "agentA", status: "Working on X" }],
+  messages: [{ id: 1, from: "agentA", content: "..." }]
+}
 \`\`\`
 
-Use \`reply_to\` to mark a message as handled (they persist until you do):
-- \`broadcast(recipient="agentA", reply_to=1, message="...")\`
+- **agents**: Status announcements (not replyable)
+- **messages**: Messages you can reply to using \`reply_to\`
+
+Use \`reply_to\` to reply to a message (auto-wires recipient):
+- \`broadcast(reply_to=1, message="...")\` → replies to message #1
 </instructions>
 `;

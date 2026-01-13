@@ -30,7 +30,7 @@ sequenceDiagram
 
     Note over B: Receive messages in context
 
-    B->>A: broadcast(recipient="agentA", reply_to=1, message="Answer!")
+    B->>A: broadcast(reply_to=1, message="Answer!")
     Note over B: Tool result shows source message
     Note over B: Message 1 removed from context
     Note over B: Audit trace persists in tool result
@@ -49,40 +49,54 @@ Add to your OpenCode config:
 ## The `broadcast` Tool
 
 ```
-broadcast(message="...")                                  # Send to all agents
-broadcast(recipient="agentB", message="...")              # Send to specific agent
-broadcast(reply_to=1, message="...")                      # Mark message as handled
-broadcast(recipient="agentA", reply_to=1, message="...")  # Reply and mark handled
+broadcast(message="...")                     # Send to all agents
+broadcast(recipient="agentB", message="...") # Send to specific agent
+broadcast(reply_to=1, message="...")         # Reply to message #1 (auto-wires recipient)
 ```
 
 ### Parameters
 
-| Parameter   | Required | Description                               |
-| ----------- | -------- | ----------------------------------------- |
-| `message`   | Yes      | Your message content                      |
-| `recipient` | No       | Target agent(s), comma-separated          |
-| `reply_to`  | No       | Message ID to mark as handled (e.g., `1`) |
+| Parameter   | Required | Description                                                     |
+| ----------- | -------- | --------------------------------------------------------------- |
+| `message`   | Yes      | Your message content                                            |
+| `recipient` | No       | Target agent (single agent only)                                |
+| `reply_to`  | No       | Message ID to reply to - auto-wires recipient to message sender |
 
 ## Receiving Messages
 
-Messages appear as a `broadcast` tool result with structured data:
+Messages are injected as a synthetic `broadcast` tool result. Here's the complete structure:
 
 ```json
 {
-  "messages": [
-    {"id": 1, "from": "agentA", "body": "What's the status on the API?"},
-    {"id": 2, "from": "agentA", "body": "Also, can you check the tests?"}
-  ]
+  "tool": "broadcast",
+  "state": {
+    "status": "completed",
+    "input": {"synthetic": true},
+    "output": {
+      "agents": [
+        {"name": "agentA", "status": "Working on frontend components"}
+      ],
+      "messages": [
+        {"id": 1, "from": "agentA", "content": "What's the status on the API?"},
+        {"id": 2, "from": "agentA", "content": "Also, can you check the tests?"}
+      ]
+    },
+    "title": "1 agent(s), 2 message(s)"
+  }
 }
 ```
 
+- **`input.synthetic`**: Indicates this was injected by IAM, not a real agent call
+- **`output.agents`**: Status announcements from other agents (not replyable)
+- **`output.messages`**: Actual messages you can reply to using `reply_to`
+
 Messages persist in the inbox until the agent marks them as handled using `reply_to`.
 
-**Discovery:** Agents discover each other by calling `broadcast` - the tool result shows all available agents.
+**Discovery:** Agents discover each other by calling `broadcast` which activates the attention mechanism.
 
 ## Attention Layer
 
-On every LLM fetch, pending inbox messages are injected as a synthetic `broadcast` tool result at the end of the message chain.
+On every LLM fetch, pending inbox messages are injected as a synthetic `broadcast` tool result at the end of the message chain. The synthetic call has `input: { synthetic: true }` to indicate it was injected by IAM, not a real agent call.
 
 After injection, the message chain looks like:
 
@@ -91,9 +105,7 @@ After injection, the message chain looks like:
 3. assistant response
 4. tool calls...
 5. user message
-6. **`[broadcast]` 2 message(s)** ← injected at end
-   - `#1 from agentA: "Doing X"`
-   - `#2 from agentA: "Question?"`
+6. **`[broadcast]` 1 agent(s), 2 message(s)** ← injected at end
 
 ## Example Workflow
 
@@ -110,10 +122,12 @@ AgentB (working on backend):
   -> broadcast(message="Starting backend work")
      # Tool result shows: "Available agents: agentA"
   -> ... sees AgentA's question in inbox ...
-  -> broadcast(recipient="agentA", reply_to=1, message="Here's the schema: {...}")
+  -> broadcast(reply_to=1, message="Here's the schema: {...}")
      # Tool result shows: Marked as handled: #1 from agentA
+     # Recipient auto-wired to agentA
 
 AgentA:
   -> ... sees AgentB's response in inbox ...
   -> broadcast(reply_to=1, message="Got it, thanks!")
+     # Recipient auto-wired to agentB
 ```

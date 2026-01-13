@@ -2,9 +2,12 @@ import * as fs from "fs";
 import * as path from "path";
 
 // =============================================================================
-// Simple file logger for debugging the inbox plugin
-// Only active when running from repo (dev mode), not from npm install
+// Simple file logger for debugging the iam plugin
+// Only active when OPENCODE_IAM_DEBUG_LOGS=1 is set in the environment
 // =============================================================================
+
+// Check if debug logging is enabled
+const DEBUG_ENABLED = process.env.OPENCODE_IAM_DEBUG_LOGS === "1";
 
 // Constants
 const LOG_DIR = path.join(process.cwd(), ".logs");
@@ -15,15 +18,17 @@ const WRITE_INTERVAL_MS = 100; // Batch writes every 100ms
 let logBuffer: string[] = [];
 let writeScheduled = false;
 
-// Ensure log directory exists and clear log file on startup
-try {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, {recursive: true});
+// Only initialize log directory if debug is enabled
+if (DEBUG_ENABLED) {
+  try {
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+    // Clear log file on each restart
+    fs.writeFileSync(LOG_FILE, "");
+  } catch {
+    // Ignore errors during init
   }
-  // Clear log file on each restart
-  fs.writeFileSync(LOG_FILE, "");
-} catch {
-  // Ignore errors during init
 }
 
 type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
@@ -66,8 +71,13 @@ function writeLog(
   level: LogLevel,
   category: string,
   message: string,
-  data?: unknown
+  data?: unknown,
 ): void {
+  // Skip all logging if debug is not enabled
+  if (!DEBUG_ENABLED) {
+    return;
+  }
+
   const timestamp = formatTimestamp();
   const dataStr = data !== undefined ? ` | ${JSON.stringify(data)}` : "";
   const logLine = `[${timestamp}] [${level}] [${category}] ${message}${dataStr}\n`;
