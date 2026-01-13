@@ -2,7 +2,7 @@
 // All LLM-facing prompts for the iam plugin
 // =============================================================================
 
-export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'recipient' for a specific agent, or omit to message all. Use 'reply_to' to reply (auto-wires recipient to sender).`;
+export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'send_to' for a specific agent, or omit to message all. Use 'reply_to' to reply (auto-wires recipient to sender).`;
 
 // =============================================================================
 // Types
@@ -99,7 +99,7 @@ Your first action should be calling \`broadcast(message="what you're working on"
 
 ## Sending Messages
 - \`broadcast(message="...")\` → announce yourself or send to all agents
-- \`broadcast(recipient="agentB", message="...")\` → send to specific agent
+- \`broadcast(send_to="agentB", message="...")\` → send to specific agent
 
 ## Receiving Messages
 Incoming messages appear as synthetic \`broadcast\` tool results:

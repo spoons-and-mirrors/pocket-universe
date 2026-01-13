@@ -637,7 +637,7 @@ const plugin: Plugin = async (ctx) => {
       broadcast: tool({
         description: BROADCAST_DESCRIPTION,
         args: {
-          recipient: tool.schema
+          send_to: tool.schema
             .string()
             .optional()
             .describe("Target agent (single agent only). Omit to send to all."),
@@ -682,7 +682,7 @@ const plugin: Plugin = async (ctx) => {
 
           log.info(LOG.TOOL, `broadcast called`, {
             alias,
-            recipient: args.recipient,
+            send_to: args.send_to,
             reply_to: args.reply_to,
             messageLength: messageContent.length,
             isFirstCall,
@@ -736,14 +736,14 @@ const plugin: Plugin = async (ctx) => {
               handledMessage = handled[0];
               autoRecipient = handledMessage.from; // Auto-wire to sender
 
-              // Warn if recipient was provided but will be ignored
-              if (args.recipient && args.recipient !== autoRecipient) {
+              // Warn if send_to was provided but will be ignored
+              if (args.send_to && args.send_to !== autoRecipient) {
                 log.warn(
                   LOG.TOOL,
-                  `reply_to provided - ignoring recipient param`,
+                  `reply_to provided - ignoring send_to param`,
                   {
                     alias,
-                    providedRecipient: args.recipient,
+                    providedSendTo: args.send_to,
                     autoWiredRecipient: autoRecipient,
                   },
                 );
@@ -761,14 +761,14 @@ const plugin: Plugin = async (ctx) => {
           let targetAliases: string[];
 
           if (autoRecipient) {
-            // reply_to takes precedence - ALWAYS auto-wire to the sender, ignore recipient param
+            // reply_to takes precedence - ALWAYS auto-wire to the sender, ignore send_to param
             targetAliases = [autoRecipient];
-          } else if (!args.recipient) {
+          } else if (!args.send_to) {
             // No target specified - send to all known agents
             targetAliases = knownAgents;
           } else {
             // Explicit recipient specified - single target only
-            targetAliases = [args.recipient.trim()];
+            targetAliases = [args.send_to.trim()];
           }
 
           // If no agents to send to, just return info

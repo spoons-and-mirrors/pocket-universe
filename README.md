@@ -21,8 +21,8 @@ sequenceDiagram
     Note over B: Get announcement in synthetic tool result
 
 
-    A->>B: broadcast(recipient="agentB", message="Question?")
-    A->>B: broadcast(recipient="agentB", message="Other question?")
+    A->>B: broadcast(send_to="agentB", message="Question?")
+    A->>B: broadcast(send_to="agentB", message="Other question?")
 
     Note over B: Get messages in synthetic tool result
 
@@ -45,17 +45,17 @@ Add to your OpenCode config:
 
 ```
 broadcast(message="...")                     # Send to all agents
-broadcast(recipient="agentB", message="...") # Send to specific agent
+broadcast(send_to="agentB", message="...")   # Send to specific agent
 broadcast(reply_to=1, message="...")         # Reply to message #1 (auto-wires recipient)
 ```
 
 ### Parameters
 
-| Parameter   | Required | Description                                                     |
-| ----------- | -------- | --------------------------------------------------------------- |
-| `message`   | Yes      | Your message content                                            |
-| `recipient` | No       | Target agent (single agent only)                                |
-| `reply_to`  | No       | Message ID to reply to - auto-wires recipient to message sender |
+| Parameter  | Required | Description                                                     |
+| ---------- | -------- | --------------------------------------------------------------- |
+| `message`  | Yes      | Your message content                                            |
+| `send_to`  | No       | Target agent (single agent only)                                |
+| `reply_to` | No       | Message ID to reply to - auto-wires recipient to message sender |
 
 ## Receiving Messages
 
@@ -121,7 +121,7 @@ AgentA (working on frontend):
   -> broadcast(message="Starting frontend work")
      # Tool result shows: "Available agents: agentB"
   -> ... does work ...
-  -> broadcast(recipient="agentB", message="Need the API schema")
+  -> broadcast(send_to="agentB", message="Need the API schema")
 
 AgentB (working on backend):
   -> broadcast(message="Starting backend work")

@@ -27,7 +27,7 @@ DO THE FOLLOWING IN THIS EXACT ORDER:
 3. sleep bash 1s (sequentially, after the previous one)
 4. sleep bash 1s (YES SLEEP BASH MULTIPLE TIMES, NOT ONE SLEEP OF 10)
 5. tell the number of messages you have received, and their content.
-6. use the broadcast tool to reply to EACH messages with the reply_to and recipient param, use mutiple broadcast calls if you have multiple questions to answer
+6. use the broadcast tool to reply to EACH messages with the reply_to and send_to param, use mutiple broadcast calls if you have multiple questions to answer
 7. show me VERBATIM what the tool output was for each broadcast call
 
 DO NOT use parallel multitool for the joke and the brocadcast, do them all sequentially.
