@@ -72,9 +72,11 @@ spawn(prompt="Build the login form", description="Login UI")
 
 1. Subagent A calls `spawn(prompt="...", description="...")`
 2. A new sibling session is created (child of the same parent as A)
-3. The spawned agent is pre-registered with IAM
-4. `spawn()` returns immediately (fire-and-forget)
-5. The spawned agent can use `broadcast` to communicate
+3. The spawned agent is pre-registered with IAM and can use `broadcast`
+4. The spawn appears as a "running" task in the parent's TUI
+5. `spawn()` **blocks** until the spawned agent completes
+6. The spawned agent's output is returned to the caller
+7. The spawn is marked "completed" in the parent's TUI
 
 ```mermaid
 sequenceDiagram
@@ -85,15 +87,38 @@ sequenceDiagram
     Parent->>A: spawn task via task tool
     Note over A: AgentA needs help
 
-    A->>Parent: spawn(prompt="Help with X")
-    Parent->>C: Create sibling session
-    Note over C: AgentC starts working
+    A->>C: spawn(prompt="Help with X")
+    Note over Parent: Task shows as "running"
+    Note over C: AgentC works on task
 
-    C->>A: broadcast(message="Working on X")
-    A->>C: broadcast(send_to="agentC", message="Thanks!")
+    C-->>A: Agent output returned
+    Note over Parent: Task shows as "completed"
+    Note over A: Continues with result
 ```
 
 **Note:** `spawn` can only be called from subagent sessions (sessions with a parentID). Main sessions should use the built-in `task` tool directly.
+
+## Session Resumption
+
+When an agent goes idle (finishes processing) and later receives a broadcast message, IAM automatically **resumes** the idle session so it can process the new message. This enables asynchronous communication patterns where agents don't need to be actively waiting for messages.
+
+```mermaid
+sequenceDiagram
+    participant A as AgentA
+    participant B as AgentB
+
+    A->>A: Completes task, goes idle
+    Note over A: Status: idle
+
+    B->>A: broadcast(send_to="agentA", message="Question?")
+    Note over A: IAM detects idle + new message
+    A->>A: Session resumed automatically
+    Note over A: Status: active
+
+    A->>B: broadcast(reply_to=1, message="Answer!")
+```
+
+This happens transparently - agents don't need to do anything special to receive messages while idle.
 
 ## Receiving Messages
 
