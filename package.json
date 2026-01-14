@@ -1,6 +1,6 @@
 {
-  "name": "@spoons-and-mirrors/iam",
-  "version": "0.1.11",
+  "name": "@spoons-and-mirrors/pocket-universe",
+  "version": "0.1.12",
   "description": "Inter-agent messaging for OpenCode parallel subagents",
   "type": "module",
   "main": "dist/index.js",

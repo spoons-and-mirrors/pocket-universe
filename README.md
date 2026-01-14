@@ -1,10 +1,23 @@
-# An Agentic Pocket Universe
+# Pocket Universe
 
-![header](./header2.webp)
+### Parallel agent orchestration for OpenCode
 
-## Overview
+## Why Pocket Universe?
 
-IAM enables parallel agents to communicate, spawn sibling agents, and coordinate work. The main session automatically waits for all spawned work to complete.
+Parallel subagents are powerful but notoriously unreliable. Work gets orphaned. Tokens get wasted. Agents finish but nobody reads their output. The classic "fire-and-forget" problem — you fire, and it actually forgets.
+
+**Pocket Universe fixes this.**
+
+- **Fire-and-forget that doesn't forget** — Spawned agents run in parallel, but their output is always piped back to the caller
+- **No wasted tokens** — Every model output is captured and delivered, guaranteed
+- **Automatic resumption** — Idle agents wake up when messages arrive
+- **Complete orchestration** — Main session waits for ALL work to finish before continuing
+
+Within a single main session call, an entire universe of parallel work can unfold — agents spawning agents, communicating, coordinating — and the main session observes it all complete before moving on. No orphaned work. No lost context. No wasted compute. No guarantee this actually helps anything, but it's worth trying.
+
+---
+
+## How It Works
 
 ```mermaid
 sequenceDiagram
@@ -22,13 +35,10 @@ sequenceDiagram
     A->>A: Continues own work
     A->>A: Finishes, about to complete
 
-    Note over A: session.before_complete hook
     Note over A: Waits for agentB...
 
     B-->>A: Completes, output piped as message
     Note over A: Unread message detected
-    Note over A: Sets resumePrompt
-
     A->>A: Session resumed automatically
     Note over A: Processes agentB's output
 
@@ -38,13 +48,13 @@ sequenceDiagram
 
 ## Installation
 
-```
-"plugin": ["@spoons-and-mirrors/iam@latest"]
+```json
+"plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
 ```
 
 ## Tools
 
-### `broadcast` - Inter-agent messaging
+### `broadcast` — Inter-agent messaging
 
 ```
 broadcast(message="...")                     # Send to all agents
@@ -58,7 +68,7 @@ broadcast(reply_to=1, message="...")         # Reply to message #1
 | `send_to`  | No       | Target agent alias                            |
 | `reply_to` | No       | Message ID to reply to (auto-wires recipient) |
 
-### `spawn` - Create sibling agents
+### `spawn` — Create sibling agents
 
 ```
 spawn(prompt="Build the login form", description="Login UI")
@@ -72,12 +82,10 @@ spawn(prompt="Build the login form", description="Login UI")
 **Key behavior:**
 
 - **Fire-and-forget**: `spawn()` returns immediately, caller continues working
-- **Output piping**: When spawned agent completes, its output is sent to caller as a message
-- **Main blocks**: The main session waits for ALL spawns and resumed sessions to complete
+- **Output piping**: When spawned agent completes, its output arrives as a message
+- **Main blocks**: The main session waits for ALL spawns and resumed sessions
 
-## Session Lifecycle & Main Blocking
-
-The `session.before_complete` hook ensures main never continues until all work is done:
+## Session Lifecycle
 
 ```mermaid
 flowchart TD
@@ -86,27 +94,26 @@ flowchart TD
     C --> D[Spawns pipe output as messages]
     D --> E{Has unread messages?}
     B -->|No| E
-    E -->|Yes| F[Set resumePrompt]
-    F --> G[OpenCode resumes session]
-    G --> H[Agent processes messages]
-    H --> A
-    E -->|No| I[Session completes]
-    I --> J[Main continues]
+    E -->|Yes| F[Resume session]
+    F --> G[Agent processes messages]
+    G --> A
+    E -->|No| H[Session completes]
+    H --> I[Main continues]
 ```
 
-**How it works:**
+The `session.before_complete` hook ensures no work is left behind:
 
-1. When an agent is about to complete, `session.before_complete` fires
-2. The hook waits for any pending spawns to become idle
-3. Spawned agents pipe their output to the caller as messages
-4. If unread messages exist, `resumePrompt` triggers a new prompt cycle
-5. The agent processes messages and the hook fires again
-6. Only when no spawns AND no messages remain does the session complete
-7. Main session continues with the full result
+1. Agent finishes its work
+2. Hook checks for pending spawns → waits for them
+3. Spawned agents pipe output to caller as messages
+4. Hook checks for unread messages → resumes session
+5. Agent processes messages, hook fires again
+6. Only when nothing pending does the session complete
+7. Main session continues with the complete result
 
 ## Session Resumption
 
-Idle agents are automatically resumed when they receive messages:
+Idle agents automatically wake up when they receive messages:
 
 ```mermaid
 sequenceDiagram
@@ -118,16 +125,15 @@ sequenceDiagram
     B->>A: broadcast(message="Question?")
     Note over A: Message arrives while idle
 
-    Note over A: session.before_complete detects message
-    A->>A: Resumed via resumePrompt
-    Note over A: Sees message in synthetic injection
+    A->>A: Resumed automatically
+    Note over A: Sees message in inbox
 
     A->>B: broadcast(reply_to=1, message="Answer!")
 ```
 
 ## Receiving Messages
 
-Messages appear as synthetic `broadcast` tool results injected into context:
+Messages appear as synthetic `broadcast` tool results:
 
 ```json
 {
@@ -135,7 +141,6 @@ Messages appear as synthetic `broadcast` tool results injected into context:
   "state": {
     "input": { "synthetic": true },
     "output": {
-      "hint": "ACTION REQUIRED: Announce yourself...",
       "agents": [{ "name": "agentA", "status": "Working on frontend" }],
       "messages": [{ "id": 1, "from": "agentA", "content": "Need help?" }]
     }
@@ -143,37 +148,9 @@ Messages appear as synthetic `broadcast` tool results injected into context:
 }
 ```
 
-- **`synthetic: true`**: Indicates IAM injection, not a real agent call
-- **`hint`**: Shown until agent announces via first broadcast
-- **`agents`**: Other agents and their status (always visible, even when idle)
-- **`messages`**: Inbox messages, reply using `reply_to`
-
-## Attention Mechanism
-
-On every LLM call, IAM injects a synthetic broadcast result showing:
-
-- All sibling agents (even idle ones) with their status
-- Any pending messages in the inbox
-
-This ensures agents always know about each other and never miss messages.
-
-## OpenCode Hook: `session.before_complete`
-
-IAM uses this hook (requires OpenCode PR) to coordinate completion:
-
-```typescript
-"session.before_complete"?: (
-  input: { sessionID: string; parentSessionID?: string },
-  output: { waitForSessions: string[]; resumePrompt?: string },
-) => Promise<void>
-```
-
-**Output options:**
-
-- `waitForSessions`: Session IDs to wait for (current session auto-filtered)
-- `resumePrompt`: If set, starts a new prompt cycle and waits for it
-
-This enables the "main blocks until everything completes" behavior.
+- **`synthetic: true`** — Injected by Pocket Universe, not a real tool call
+- **`agents`** — All sibling agents and their status (always visible)
+- **`messages`** — Inbox messages, reply using `reply_to`
 
 ## Example: Parallel Work with Spawn
 
@@ -188,26 +165,40 @@ AgentA:
   -> ... does frontend work ...
   -> Finishes own work
 
-  # session.before_complete fires:
+  # Before completing:
   # - Waits for spawned agentB
   # - agentB completes, output piped to agentA
   # - agentA resumed to process output
 
-  -> Sees agentB's output in inbox
-  -> broadcast(message="Got the API, integrating...")
+  -> Sees agentB's API output in inbox
+  -> Integrates API with frontend
   -> Completes with full result
 
 Main Session:
   -> Receives complete result (frontend + API integrated)
 ```
 
-## Architecture Summary
+## Architecture
 
-| Component                 | Purpose                                  |
-| ------------------------- | ---------------------------------------- |
-| `broadcast`               | Send/receive messages between agents     |
-| `spawn`                   | Create sibling agents (fire-and-forget)  |
-| Synthetic injection       | Show agents + messages on every LLM call |
-| `session.before_complete` | Wait for spawns, trigger resumes         |
-| Output piping             | Spawned agent output → caller inbox      |
-| Session resumption        | Wake idle agents on new messages         |
+| Component                 | Purpose                                                    |
+| ------------------------- | ---------------------------------------------------------- |
+| `broadcast`               | Send/receive messages between agents                       |
+| `spawn`                   | Create sibling agents (fire-and-forget with output piping) |
+| Synthetic injection       | Show agents + messages on every LLM call                   |
+| `session.before_complete` | Wait for spawns, trigger resumes                           |
+| Output piping             | Spawned agent output → caller inbox                        |
+| Session resumption        | Wake idle agents on new messages                           |
+
+## OpenCode Hook
+
+Pocket Universe uses the `session.before_complete` hook:
+
+```typescript
+"session.before_complete"?: (
+  input: { sessionID: string; parentSessionID?: string },
+  output: { waitForSessions: string[]; resumePrompt?: string },
+) => Promise<void>
+```
+
+- `waitForSessions` — Session IDs to wait for before completing
+- `resumePrompt` — If set, starts a new prompt cycle and waits for it

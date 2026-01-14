@@ -843,7 +843,7 @@ function createInboxMessage(
         tool: "broadcast",
         state: {
           status: "completed",
-          input: { synthetic: true }, // Hints this was injected by IAM, not a real agent call
+          input: { synthetic: true }, // Hints this was injected by Pocket Universe, not a real agent call
           output,
           title,
           metadata: {
@@ -928,13 +928,13 @@ session_id: ${spawn.sessionId}
             description: spawn.description,
             prompt: spawn.prompt,
             subagent_type: "general",
-            synthetic: true, // Indicates this was spawned by IAM
+            synthetic: true, // Indicates this was spawned by Pocket Universe
           },
           output,
           title: spawn.description,
           metadata: {
             sessionId: spawn.sessionId,
-            spawned_by_iam: true,
+            spawned_by_pocket_universe: true,
           },
           time: { start: spawn.timestamp, end: now },
         },
@@ -1015,7 +1015,7 @@ async function injectTaskPartToParent(
         title: spawn.description,
         metadata: {
           sessionId: spawn.sessionId,
-          spawned_by_iam: true,
+          spawned_by_pocket_universe: true,
         },
         time: { start: spawn.timestamp, end: 0 }, // end=0 indicates still running
       },
@@ -1277,7 +1277,7 @@ async function markSpawnCompleted(
       title: spawn.description,
       metadata: {
         sessionId: spawn.sessionId,
-        spawned_by_iam: true,
+        spawned_by_pocket_universe: true,
       },
       time: { start: spawn.timestamp, end: now },
     },
@@ -1459,7 +1459,7 @@ const plugin: Plugin = async (ctx) => {
 
     // Track session idle events for broadcast resumption AND spawn completion
     "session.idle": async ({ sessionID }: { sessionID: string }) => {
-      // Check if this is a registered IAM session (child session)
+      // Check if this is a registered Pocket Universe session (child session)
       const alias = sessionToAlias.get(sessionID);
       const isRegistered = activeSessions.has(sessionID);
       const hasPendingSpawns = callerPendingSpawns.has(sessionID);
@@ -1861,7 +1861,7 @@ const plugin: Plugin = async (ctx) => {
                 await internalClient.post({
                   url: `/session/${parentId}/notify_once`,
                   body: {
-                    text: `[IAM] Message from ${alias}: ${args.message}`,
+                    text: `[Pocket Universe] Message from ${alias}: ${args.message}`,
                   },
                 });
                 log.info(LOG.MESSAGE, `Parent session notified successfully`, {
@@ -2224,7 +2224,7 @@ const plugin: Plugin = async (ctx) => {
       if (!(await isChildSession(client, sessionId))) {
         log.debug(
           LOG.INJECT,
-          `Session has no parentID (main session), skipping IAM`,
+          `Session has no parentID (main session), skipping Pocket Universe`,
           { sessionId },
         );
         return;
@@ -2261,11 +2261,11 @@ const plugin: Plugin = async (ctx) => {
         }
       }
 
-      // Inject IAM instructions
+      // Inject Pocket Universe instructions
       output.system.push(SYSTEM_PROMPT);
       log.info(
         LOG.INJECT,
-        `Registered session and injected IAM system prompt`,
+        `Registered session and injected Pocket Universe system prompt`,
         {
           sessionId,
           alias: getAlias(sessionId),
@@ -2285,7 +2285,7 @@ const plugin: Plugin = async (ctx) => {
       if (!lastUserMsg) {
         log.debug(
           LOG.INJECT,
-          `No user message found in transform, skipping IAM injection`,
+          `No user message found in transform, skipping Pocket Universe injection`,
         );
         return;
       }
@@ -2321,12 +2321,16 @@ const plugin: Plugin = async (ctx) => {
         }
       }
 
-      // Only inject IAM broadcast/inbox for child sessions (those with parentID)
+      // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
-        log.debug(LOG.INJECT, `Skipping IAM inbox for main session`, {
-          sessionId,
-          injectedSpawns: uninjectedSpawns.length,
-        });
+        log.debug(
+          LOG.INJECT,
+          `Skipping Pocket Universe inbox for main session`,
+          {
+            sessionId,
+            injectedSpawns: uninjectedSpawns.length,
+          },
+        );
         return;
       }
 

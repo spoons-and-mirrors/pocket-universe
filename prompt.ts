@@ -1,10 +1,10 @@
 // =============================================================================
-// All LLM-facing prompts for the iam plugin
+// All LLM-facing prompts for the Pocket Universe plugin
 // =============================================================================
 
 export const BROADCAST_DESCRIPTION = `Communicate with other parallel agents. Use 'send_to' for a specific agent, or omit to message all. Use 'reply_to' to reply (auto-wires recipient to sender).`;
 
-export const SPAWN_DESCRIPTION = `Spawn a new sibling agent to work on a task in parallel. The new agent joins the IAM network and can communicate via broadcast. Returns immediately (fire-and-forget). When the spawned agent completes, its output is piped to the caller.`;
+export const SPAWN_DESCRIPTION = `Spawn a new sibling agent to work on a task in parallel. The new agent joins the network and can communicate via broadcast. Returns immediately (fire-and-forget). When the spawned agent completes, its output is piped to the caller.`;
 
 // =============================================================================
 // Types
@@ -105,8 +105,8 @@ export const SPAWN_MISSING_PROMPT = `Error: 'prompt' parameter is required.`;
 // =============================================================================
 
 export const SYSTEM_PROMPT = `
-<instructions tool="iam">
-# Inter-Agent Messaging
+<instructions tool="pocket-universe">
+# Pocket Universe — Parallel Agent Orchestration
 
 Use \`broadcast\` to communicate with other parallel agents.
 Use \`spawn\` to create new sibling agents for parallel work.

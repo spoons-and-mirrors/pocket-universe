@@ -2,16 +2,16 @@ import * as fs from "fs";
 import * as path from "path";
 
 // =============================================================================
-// Simple file logger for debugging the iam plugin
-// Only active when OPENCODE_IAM_DEBUG_LOGS=1 is set in the environment
+// Simple file logger for debugging the Pocket Universe plugin
+// Only active when OPENCODE_POCKET_UNIVERSE_DEBUG_LOGS=1 is set in the environment
 // =============================================================================
 
 // Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.OPENCODE_IAM_DEBUG_LOGS === "1";
+const DEBUG_ENABLED = process.env.OPENCODE_POCKET_UNIVERSE_DEBUG_LOGS === "1";
 
 // Constants
 const LOG_DIR = path.join(process.cwd(), ".logs");
-const LOG_FILE = path.join(LOG_DIR, "iam.log");
+const LOG_FILE = path.join(LOG_DIR, "pocket-universe.log");
 const WRITE_INTERVAL_MS = 100; // Batch writes every 100ms
 
 // Async log buffer
