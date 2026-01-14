@@ -156,6 +156,10 @@ const sessionParentCache = new Map<string, CachedParentId>();
 // Cache for child session checks (fast path)
 const childSessionCache = new Set<string>();
 
+// Store pending task descriptions by parent session ID
+// parentSessionId -> array of descriptions (most recent last)
+const pendingTaskDescriptions = new Map<string, string[]>();
+
 // ============================================================================
 // Cleanup - prevent memory leaks
 // ============================================================================
@@ -864,26 +868,38 @@ const plugin: Plugin = async (ctx) => {
       }),
     },
 
-    // Register subagents when task tool completes (backup registration)
-    "tool.execute.after": async (
-      input: ToolExecuteInput,
-      output: ToolExecuteOutput,
-    ) => {
-      log.debug(LOG.HOOK, `tool.execute.after fired`, {
-        tool: input.tool,
-        sessionID: input.sessionID,
-        hasMetadata: !!output.metadata,
+    // Capture task description before execution
+    "tool.execute.before": async (input: unknown, output: unknown) => {
+      const typedInput = input as {
+        tool: string;
+        sessionID: string;
+        callID: string;
+      };
+      const typedOutput = output as {
+        args?: { description?: string; prompt?: string };
+      };
+
+      log.debug(LOG.HOOK, `tool.execute.before fired`, {
+        tool: typedInput.tool,
+        sessionID: typedInput.sessionID,
+        hasArgs: !!typedOutput?.args,
+        hasDescription: !!typedOutput?.args?.description,
       });
 
-      if (input.tool === "task") {
-        const newSessionId = (output.metadata?.sessionId ||
-          output.metadata?.session_id) as string | undefined;
-        if (newSessionId) {
-          log.info(LOG.HOOK, `task completed, ensuring session registered`, {
-            newSessionId,
-          });
-          registerSession(newSessionId);
-        }
+      if (typedInput.tool === "task" && typedOutput?.args?.description) {
+        const description = typedOutput.args.description;
+        const parentSessionId = typedInput.sessionID;
+
+        // Store description keyed by parent session ID
+        const existing = pendingTaskDescriptions.get(parentSessionId) || [];
+        existing.push(description);
+        pendingTaskDescriptions.set(parentSessionId, existing);
+
+        log.info(LOG.HOOK, `Captured task description`, {
+          parentSessionId,
+          description: description.substring(0, 80),
+          totalPending: existing.length,
+        });
       }
     },
 
@@ -914,6 +930,34 @@ const plugin: Plugin = async (ctx) => {
 
       // Register child session early - before agent even calls broadcast
       registerSession(sessionId);
+
+      // Check if there's a pending task description for this session's parent
+      const parentId = await getParentId(client, sessionId);
+      if (parentId) {
+        const pending = pendingTaskDescriptions.get(parentId);
+        if (pending && pending.length > 0) {
+          // Use the first pending description for this child session
+          const description = pending.shift()!;
+          setDescription(sessionId, description);
+          // Don't mark as announced - agent should still see the hint to broadcast
+
+          log.info(
+            LOG.HOOK,
+            `Applied task description as initial agent status`,
+            {
+              sessionId,
+              alias: getAlias(sessionId),
+              description: description.substring(0, 80),
+              remainingPending: pending.length,
+            },
+          );
+
+          // Clean up if empty
+          if (pending.length === 0) {
+            pendingTaskDescriptions.delete(parentId);
+          }
+        }
+      }
 
       // Inject IAM instructions
       output.system.push(SYSTEM_PROMPT);
