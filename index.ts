@@ -229,6 +229,12 @@ const pendingSpawns = new Map<string, SpawnInfo[]>();
 // Track active spawns by sessionId for completion updates
 const activeSpawns = new Map<string, SpawnInfo>();
 
+// Track pending spawns per CALLER session (not parent)
+// When agentA spawns agentB, we track that agentA has a pending spawn
+// This allows us to keep agentA alive until agentB completes
+// Key: caller session ID, Value: Set of spawned session IDs
+const callerPendingSpawns = new Map<string, Set<string>>();
+
 // ============================================================================
 // Session State Tracking (for broadcast resumption)
 // ============================================================================
@@ -1330,8 +1336,20 @@ const plugin: Plugin = async (ctx) => {
   return {
     // Track session idle events for broadcast resumption AND spawn completion
     "session.idle": async ({ sessionID }: { sessionID: string }) => {
-      log.debug(LOG.SESSION, `session.idle hook fired`, { sessionID });
+      // Check if this is a registered IAM session (child session)
       const alias = sessionToAlias.get(sessionID);
+      const isRegistered = activeSessions.has(sessionID);
+      const hasPendingSpawns = callerPendingSpawns.has(sessionID);
+      const pendingCount = callerPendingSpawns.get(sessionID)?.size || 0;
+
+      log.info(LOG.SESSION, `session.idle hook fired`, {
+        sessionID,
+        alias: alias || "unknown",
+        isRegistered,
+        hasPendingSpawns,
+        pendingSpawnCount: pendingCount,
+      });
+
       if (alias) {
         sessionStates.set(sessionID, {
           sessionId: sessionID,
@@ -1375,6 +1393,23 @@ const plugin: Plugin = async (ctx) => {
       if (subtaskSessionId) {
         const alias = sessionToAlias.get(subtaskSessionId);
         if (alias) {
+          // Check if this session has pending spawns
+          const pendingSpawns = callerPendingSpawns.get(subtaskSessionId);
+          if (pendingSpawns && pendingSpawns.size > 0) {
+            log.warn(
+              LOG.SESSION,
+              `Task completing but has pending spawns! Main will continue early.`,
+              {
+                subtaskSessionId,
+                alias,
+                pendingSpawnCount: pendingSpawns.size,
+                pendingSpawnIds: Array.from(pendingSpawns),
+              },
+            );
+            // TODO: Find a way to prevent this - main session will continue
+            // before spawned agents complete
+          }
+
           sessionStates.set(subtaskSessionId, {
             sessionId: subtaskSessionId,
             alias,
@@ -1809,6 +1844,21 @@ const plugin: Plugin = async (ctx) => {
               parentSessionId: parentId,
             };
 
+            // Track that the CALLER has a pending spawn
+            // This allows us to keep the caller alive until the spawn completes
+            let callerSpawns = callerPendingSpawns.get(sessionId);
+            if (!callerSpawns) {
+              callerSpawns = new Set();
+              callerPendingSpawns.set(sessionId, callerSpawns);
+            }
+            callerSpawns.add(newSessionId);
+            log.info(LOG.TOOL, `spawn tracked for caller`, {
+              callerSessionId: sessionId,
+              callerAlias,
+              spawnedSessionId: newSessionId,
+              totalPendingSpawns: callerSpawns.size,
+            });
+
             // Try to inject immediately into parent's message history
             const injected = await injectTaskPartToParent(
               client,
@@ -1834,8 +1884,8 @@ const plugin: Plugin = async (ctx) => {
             }
 
             // Step 3: Start the session WITHOUT blocking (fire-and-forget)
-            // The spawned agent runs in parallel with the caller.
-            // Completion is detected via session.idle hook, which marks the spawn complete.
+            // agentA can continue working while agentB runs in parallel.
+            // When agentB completes, we pipe its output to agentA.
             log.info(LOG.TOOL, `spawn starting session (non-blocking)`, {
               newAlias,
               newSessionId,
@@ -1863,10 +1913,16 @@ const plugin: Plugin = async (ctx) => {
                   });
                 }
 
-                // Since session.idle hook doesn't fire for spawned sessions,
-                // we handle completion here manually:
+                // Spawned session completed - handle completion:
 
-                // 1. Mark session as idle in sessionStates (enables resume)
+                // 1. Fetch the output from spawned session
+                const spawnOutput = await fetchSpawnOutput(
+                  client,
+                  newSessionId,
+                  newAlias,
+                );
+
+                // 2. Mark session as idle in sessionStates (enables resume)
                 sessionStates.set(newSessionId, {
                   sessionId: newSessionId,
                   alias: newAlias,
@@ -1878,18 +1934,75 @@ const plugin: Plugin = async (ctx) => {
                   newAlias,
                 });
 
-                // 2. Handle spawn completion (fetch output, mark complete in TUI)
+                // 3. Mark the spawn as completed in the parent TUI
                 const spawn = activeSpawns.get(newSessionId);
                 if (spawn) {
-                  const output = await fetchSpawnOutput(
-                    client,
-                    newSessionId,
-                    newAlias,
-                  );
-                  await markSpawnCompleted(client, spawn, output);
+                  await markSpawnCompleted(client, spawn, spawnOutput);
                 }
 
-                // 3. Check for unread messages and resume if needed
+                // 4. Remove from caller's pending spawns
+                const callerSpawnsAfter = callerPendingSpawns.get(sessionId);
+                if (callerSpawnsAfter) {
+                  callerSpawnsAfter.delete(newSessionId);
+                  log.info(LOG.TOOL, `spawn removed from caller pending`, {
+                    callerSessionId: sessionId,
+                    spawnedSessionId: newSessionId,
+                    remainingSpawns: callerSpawnsAfter.size,
+                  });
+                  if (callerSpawnsAfter.size === 0) {
+                    callerPendingSpawns.delete(sessionId);
+                  }
+                }
+
+                // 5. Pipe the spawn output to the caller (agentA)
+                // If caller is idle: resume with the output
+                // If caller is active: send as broadcast message (will be injected via transform)
+                const callerState = sessionStates.get(sessionId);
+                const callerAlias = sessionToAlias.get(sessionId) || "caller";
+
+                // Create a summary message with the spawn output
+                const outputMessage = `[Spawn completed: ${newAlias}]\n${spawnOutput}`;
+
+                if (callerState?.status === "idle") {
+                  // Caller is idle - resume with the output
+                  log.info(
+                    LOG.TOOL,
+                    `Piping spawn output to idle caller via resume`,
+                    {
+                      callerSessionId: sessionId,
+                      callerAlias,
+                      spawnAlias: newAlias,
+                    },
+                  );
+                  resumeSessionWithBroadcast(
+                    sessionId,
+                    newAlias,
+                    outputMessage,
+                  ).catch((e) =>
+                    log.error(
+                      LOG.TOOL,
+                      `Failed to pipe spawn output to caller`,
+                      {
+                        error: String(e),
+                      },
+                    ),
+                  );
+                } else {
+                  // Caller is still active - send as broadcast message
+                  // It will be picked up by the synthetic injection on next LLM call
+                  log.info(
+                    LOG.TOOL,
+                    `Piping spawn output to active caller via message`,
+                    {
+                      callerSessionId: sessionId,
+                      callerAlias,
+                      spawnAlias: newAlias,
+                    },
+                  );
+                  sendMessage(newAlias, sessionId, outputMessage);
+                }
+
+                // 6. Check for unread messages and resume spawned session if needed
                 const unreadMessages = getMessagesNeedingResume(newSessionId);
                 if (unreadMessages.length > 0) {
                   log.info(
