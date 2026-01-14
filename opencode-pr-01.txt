@@ -1,0 +1,64 @@
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 345b1c49e..449046708 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -621,6 +621,42 @@ export namespace SessionPrompt {
+       continue
+     }
+     SessionCompaction.prune({ sessionID })
++
++    // Allow plugins to specify additional sessions to wait for before completing
++    const sessionInfo = await Session.get(sessionID)
++    const waitOutput = { waitForSessions: [] as string[] }
++    await Plugin.trigger("session.before_complete", { sessionID, parentSessionID: sessionInfo?.parentID }, waitOutput)
++    if (waitOutput.waitForSessions.length > 0) {
++      log.info("waiting for additional sessions before completing", {
++        sessionID,
++        waitForSessions: waitOutput.waitForSessions,
++      })
++      await Promise.all(
++        waitOutput.waitForSessions.map(
++          (siblingID) =>
++            new Promise<void>((resolve) => {
++              // Check if already idle
++              const status = SessionStatus.get(siblingID)
++              if (status.type === "idle") {
++                resolve()
++                return
++              }
++              // Wait for idle event
++              const unsub = Bus.subscribe(SessionStatus.Event.Idle, (event) => {
++                if (event.properties.sessionID === siblingID) {
++                  unsub()
++                  resolve()
++                }
++              })
++            }),
++        ),
++      )
++      log.info("additional sessions completed", {
++        sessionID,
++        completedSessions: waitOutput.waitForSessions,
++      })
++    }
++
+     for await (const item of MessageV2.stream(sessionID)) {
+       if (item.info.role === "user") continue
+       const queued = state()[sessionID]?.callbacks ?? []
+diff --git a/packages/plugin/src/index.ts b/packages/plugin/src/index.ts
+index e57eff579..1d4d0c2fa 100644
+--- a/packages/plugin/src/index.ts
++++ b/packages/plugin/src/index.ts
+@@ -215,4 +215,12 @@ export interface Hooks {
+     input: { sessionID: string; messageID: string; partID: string },
+     output: { text: string },
+   ) => Promise<void>
++  /**
++   * Called before a session completes. Allows plugins to specify additional
++   * sessions that should complete before this session is considered done.
++   */
++  "session.before_complete"?: (
++    input: { sessionID: string; parentSessionID?: string },
++    output: { waitForSessions: string[] },
++  ) => Promise<void>
+ }

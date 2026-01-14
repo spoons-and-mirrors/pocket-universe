@@ -1,0 +1,116 @@
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 345b1c49e..30cc90186 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -621,6 +621,89 @@ export namespace SessionPrompt {
+       continue
+     }
+     SessionCompaction.prune({ sessionID })
++
++    // Allow plugins to specify additional sessions to wait for before completing
++    // and optionally request a resume prompt
++    const sessionInfo = await Session.get(sessionID)
++    const waitOutput = { waitForSessions: [] as string[], resumePrompt: undefined as string | undefined }
++    await Plugin.trigger("session.before_complete", { sessionID, parentSessionID: sessionInfo?.parentID }, waitOutput)
++
++    // Log what we got back from the plugin
++    log.info("session.before_complete hook returned", {
++      sessionID,
++      waitForSessions: waitOutput.waitForSessions,
++      hasResumePrompt: !!waitOutput.resumePrompt,
++      resumePromptLength: waitOutput.resumePrompt?.length,
++    })
++
++    // Filter out the current session to prevent deadlock (can't wait for self while completing)
++    const sessionsToWait = waitOutput.waitForSessions.filter((id) => id !== sessionID)
++
++    if (sessionsToWait.length > 0) {
++      log.info("waiting for additional sessions before completing", {
++        sessionID,
++        waitForSessions: sessionsToWait,
++      })
++      await Promise.all(
++        sessionsToWait.map(
++          (siblingID) =>
++            new Promise<void>((resolve) => {
++              // Check if already idle
++              const status = SessionStatus.get(siblingID)
++              if (status.type === "idle") {
++                resolve()
++                return
++              }
++              // Wait for idle event
++              const unsub = Bus.subscribe(SessionStatus.Event.Idle, (event) => {
++                if (event.properties.sessionID === siblingID) {
++                  unsub()
++                  resolve()
++                }
++              })
++            }),
++        ),
++      )
++      log.info("additional sessions completed", {
++        sessionID,
++        completedSessions: sessionsToWait,
++      })
++    }
++
++    // If plugin requested a resume, start a new prompt and wait for it to complete
++    // This allows the session to process messages that arrived during spawn waits
++    if (waitOutput.resumePrompt) {
++      log.info("session.before_complete: resuming with prompt", {
++        sessionID,
++        promptLength: waitOutput.resumePrompt.length,
++      })
++
++      // CRITICAL: We need to temporarily release the session lock before calling prompt()
++      // Otherwise, the recursive prompt() will see the session as "busy" and wait for us,
++      // but we're waiting for it - causing a deadlock!
++      // Save current state, clear it, run recursive prompt, then we'll return anyway
++      const currentState = state()[sessionID]
++      delete state()[sessionID]
++
++      try {
++        // Recursively call prompt - this will trigger session.before_complete again when it finishes
++        await prompt({
++          sessionID,
++          parts: [{ type: "text", text: waitOutput.resumePrompt }],
++        })
++      } finally {
++        // Restore state if it was cleared (the recursive prompt sets its own state)
++        // Actually, we don't need to restore - the recursive prompt handles its own lifecycle
++        // and we're about to return anyway. But resolve any pending callbacks from original state.
++        if (currentState) {
++          for (const item of currentState.callbacks) {
++            // These callbacks were waiting for us, they'll get the final message from MessageV2.stream below
++          }
++        }
++      }
++      // After recursive prompt completes, continue to return
++    }
++
+     for await (const item of MessageV2.stream(sessionID)) {
+       if (item.info.role === "user") continue
+       const queued = state()[sessionID]?.callbacks ?? []
+diff --git a/packages/plugin/src/index.ts b/packages/plugin/src/index.ts
+index e57eff579..3d4f0ac9a 100644
+--- a/packages/plugin/src/index.ts
++++ b/packages/plugin/src/index.ts
+@@ -215,4 +215,17 @@ export interface Hooks {
+     input: { sessionID: string; messageID: string; partID: string },
+     output: { text: string },
+   ) => Promise<void>
++  /**
++   * Called before a session completes. Allows plugins to specify additional
++   * sessions that should complete before this session is considered done.
++   *
++   * Output options:
++   * - waitForSessions: Session IDs to wait for before completing (current session is auto-filtered)
++   * - resumePrompt: If set, after waiting, a new prompt will be started with this text
++   *                 and the hook will be called again after that prompt completes
++   */
++  "session.before_complete"?: (
++    input: { sessionID: string; parentSessionID?: string },
++    output: { waitForSessions: string[]; resumePrompt?: string },
++  ) => Promise<void>
+ }

@@ -1334,27 +1334,126 @@ const plugin: Plugin = async (ctx) => {
   storedClient = client;
 
   return {
-    // Allow main session to wait for spawned grandchild sessions
+    // Allow main session to wait for spawned grandchild sessions AND resumed sessions
     "session.before_complete": async (
       input: { sessionID: string; parentSessionID?: string },
-      output: { waitForSessions: string[] },
+      output: { waitForSessions: string[]; resumePrompt?: string },
     ) => {
-      // Check if this session has pending spawns (grandchildren of parent)
-      const pendingSpawns = callerPendingSpawns.get(input.sessionID);
-      if (pendingSpawns && pendingSpawns.size > 0) {
-        log.info(
-          LOG.SESSION,
-          `session.before_complete: adding spawns to wait list`,
-          {
+      const alias = sessionToAlias.get(input.sessionID) || "unknown";
+
+      // Helper to wait for a session to become idle
+      const waitForSessionIdle = (targetSessionId: string): Promise<void> => {
+        return new Promise((resolve) => {
+          const checkIdle = () => {
+            const state = sessionStates.get(targetSessionId);
+            if (state?.status === "idle") {
+              resolve();
+              return true;
+            }
+            return false;
+          };
+
+          // Check immediately
+          if (checkIdle()) return;
+
+          // Poll every 100ms (sessionStates is updated when sessions go idle)
+          const interval = setInterval(() => {
+            if (checkIdle()) {
+              clearInterval(interval);
+            }
+          }, 100);
+
+          // Timeout after 5 minutes to prevent infinite wait
+          setTimeout(
+            () => {
+              clearInterval(interval);
+              resolve();
+            },
+            5 * 60 * 1000,
+          );
+        });
+      };
+
+      // Loop until all spawns complete AND no pending resumes
+      let iteration = 0;
+      while (iteration < 100) {
+        // Safety limit
+        iteration++;
+
+        // 1. Check for pending spawns
+        const pendingSpawns = callerPendingSpawns.get(input.sessionID);
+        if (pendingSpawns && pendingSpawns.size > 0) {
+          const spawnIds = Array.from(pendingSpawns);
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: waiting for spawns (iteration ${iteration})`,
+            {
+              sessionID: input.sessionID,
+              alias,
+              pendingSpawnCount: spawnIds.length,
+              pendingSpawnIds: spawnIds,
+            },
+          );
+
+          // Wait for all pending spawns to become idle
+          await Promise.all(spawnIds.map(waitForSessionIdle));
+
+          log.info(LOG.SESSION, `session.before_complete: spawns completed`, {
             sessionID: input.sessionID,
-            parentSessionID: input.parentSessionID,
-            pendingSpawnCount: pendingSpawns.size,
-            pendingSpawnIds: Array.from(pendingSpawns),
-          },
-        );
-        for (const spawnId of pendingSpawns) {
-          output.waitForSessions.push(spawnId);
+            alias,
+            completedSpawns: spawnIds,
+          });
+
+          // Continue loop to check for messages that may have arrived
+          continue;
         }
+
+        // 2. Check for unread messages (may have been piped from completed spawns)
+        const unreadMessages = getMessagesNeedingResume(input.sessionID);
+        if (unreadMessages.length > 0) {
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: has unread messages, setting resumePrompt`,
+            {
+              sessionID: input.sessionID,
+              alias,
+              unreadCount: unreadMessages.length,
+            },
+          );
+
+          // Mark the message as presented so we don't loop forever
+          const firstUnread = unreadMessages[0];
+          markMessagesAsPresented(input.sessionID, [firstUnread.msgIndex]);
+
+          // Tell OpenCode to resume this session with the given prompt
+          // OpenCode will:
+          // 1. Complete this hook
+          // 2. Start a new prompt with resumePrompt
+          // 3. Wait for that prompt to complete
+          // 4. Then session.before_complete fires again (recursively)
+          // This avoids the deadlock of calling prompt() from within the hook
+          output.resumePrompt = `[Broadcast from ${firstUnread.from}]: New message received. Check your inbox.`;
+
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: resumePrompt set, breaking loop`,
+            {
+              sessionID: input.sessionID,
+              alias,
+            },
+          );
+
+          // Break out - OpenCode will handle the resume and call this hook again
+          break;
+        }
+
+        // Nothing pending - we're done
+        log.info(LOG.SESSION, `session.before_complete: all done`, {
+          sessionID: input.sessionID,
+          alias,
+          iterations: iteration,
+        });
+        break;
       }
     },
 
