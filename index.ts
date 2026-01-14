@@ -11,1315 +11,55 @@ import {
   SPAWN_MISSING_PROMPT,
   spawnResult,
   SYSTEM_PROMPT,
-  type ParallelAgent,
   type HandledMessage,
 } from "./prompt";
 import { log, LOG } from "./logger";
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const CHAR_CODE_A = 65; // ASCII code for 'A'
-const ALPHABET_SIZE = 26;
-const MAX_DESCRIPTION_LENGTH = 300;
-const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes for handled messages
-const UNHANDLED_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for unhandled messages
-const MAX_INBOX_SIZE = 100; // Max messages per inbox
-const PARENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes // DORMANT: parent alias feature // DORMANT: parent alias feature
-const CLEANUP_INTERVAL_MS = 60 * 1000; // Run cleanup every minute
-const DEFAULT_MODEL_ID = "gpt-4o-2024-08-06";
-const DEFAULT_PROVIDER_ID = "openai";
-const MAX_MESSAGE_LENGTH = 10000; // Prevent excessively long messages
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface Message {
-  id: string; // Internal ID (random string)
-  msgIndex: number; // Numeric index for display (1-based, per session)
-  from: string;
-  to: string;
-  body: string;
-  timestamp: number;
-  handled: boolean;
-}
-
-// DORMANT: parent alias feature
-interface CachedParentId {
-  value: string | null;
-  cachedAt: number;
-}
-
-/** Minimal interface for OpenCode SDK client session API */
-interface OpenCodeSessionClient {
-  session: {
-    get: (params: {
-      path: { id: string };
-    }) => Promise<{ data?: { parentID?: string } }>;
-    create: (params: {
-      body?: { parentID?: string; title?: string };
-    }) => Promise<{ data?: { id: string } }>;
-    messages: (params: { path: { id: string } }) => Promise<{
-      data?: Array<{
-        info: { id: string; role: string; sessionID: string };
-        parts?: unknown[];
-      }>;
-    }>;
-    prompt: (params: {
-      path: { id: string };
-      body: {
-        parts: Array<{ type: string; text?: string }>;
-        agent?: string;
-        model?: { modelID?: string; providerID?: string };
-      };
-    }) => Promise<{ data?: unknown; error?: unknown }>;
-    promptAsync: (params: {
-      path: { id: string };
-      body: {
-        parts: Array<{ type: string; text?: string }>;
-        agent?: string;
-        model?: { modelID?: string; providerID?: string };
-      };
-    }) => Promise<{ data?: unknown }>;
-  };
-  part: {
-    update: (params: {
-      path: { sessionID: string; messageID: string; partID: string };
-      body: {
-        id: string;
-        sessionID: string;
-        messageID: string;
-        type: string;
-        prompt?: string;
-        description?: string;
-        agent?: string;
-      };
-    }) => Promise<{ data?: unknown; error?: unknown }>;
-  };
-}
-
-/** Internal client interface (accessed via type assertion) */
-interface InternalClient {
-  post?: (params: { url: string; body: unknown }) => Promise<unknown>;
-  patch?: (params: { url: string; body: unknown }) => Promise<unknown>;
-}
-
-/** Message info from OpenCode SDK */
-interface MessageInfo {
-  id: string;
-  sessionID: string;
-  role: string;
-  agent?: string;
-  model?: {
-    modelID?: string;
-    providerID?: string;
-  };
-  variant?: unknown;
-}
-
-/** User message structure from OpenCode SDK */
-interface UserMessage {
-  info: MessageInfo;
-  parts: unknown[];
-}
-
-/** Tool execution context */
-interface ToolContext {
-  sessionID: string;
-}
-
-/** Hook input for tool.execute.after */
-interface ToolExecuteInput {
-  tool: string;
-  sessionID: string;
-}
-
-/** Hook output for tool.execute.after */
-interface ToolExecuteOutput {
-  metadata?: {
-    sessionId?: string;
-    session_id?: string;
-  };
-  output?: string;
-}
-
-/** Hook input for system.transform */
-interface SystemTransformInput {
-  sessionID?: string;
-}
-
-/** Hook output for system.transform */
-interface SystemTransformOutput {
-  system: string[];
-}
-
-/** Hook output for messages.transform */
-interface MessagesTransformOutput {
-  messages: UserMessage[];
-}
-
-/** Hook output for config.transform */
-interface ConfigTransformOutput {
-  experimental?: {
-    subagent_tools?: string[];
-    [key: string]: unknown;
-  };
-}
-
-// ============================================================================
-// In-memory message store
-// ============================================================================
-
-// Inboxes indexed by recipient session ID
-const inboxes = new Map<string, Message[]>();
-
-// Message index counter per session (for numeric IDs)
-const sessionMsgCounter = new Map<string, number>();
-
-// Track ALL active sessions
-const activeSessions = new Set<string>();
-
-// Track sessions that have announced themselves (called broadcast at least once)
-const announcedSessions = new Set<string>();
-
-// Alias mappings: sessionId <-> alias (e.g., "agentA", "agentB")
-const sessionToAlias = new Map<string, string>();
-const aliasToSession = new Map<string, string>();
-const agentDescriptions = new Map<string, string>(); // alias -> description
-
-// Atomic alias counter with registration lock
-let nextAgentIndex = 0;
-const registeringSessionsLock = new Set<string>(); // Prevent race conditions
-
-// DORMANT: parent alias feature
-// Cache for parentID lookups with expiry
-const sessionParentCache = new Map<string, CachedParentId>();
-
-// Cache for child session checks (fast path)
-const childSessionCache = new Set<string>();
-
-// Store pending task descriptions by parent session ID
-// parentSessionId -> array of descriptions (most recent last)
-const pendingTaskDescriptions = new Map<string, string[]>();
-
-// Track messages that were presented to an agent via transform injection
-// These are different from "handled" messages (which are explicitly replied to via reply_to)
-// Presented messages: agent saw them in context, may or may not have responded
-// Handled messages: agent explicitly used reply_to to respond
-// Key: sessionId, Value: Set of msgIndex that were presented
-const presentedMessages = new Map<string, Set<number>>();
-// Track spawned sessions that need to be injected into parent's message history
-// Maps parentSessionId -> array of spawn info
-interface SpawnInfo {
-  sessionId: string;
-  alias: string;
-  description: string;
-  prompt: string;
-  timestamp: number;
-  injected: boolean;
-  // For updating the task part when spawn completes
-  partId?: string;
-  parentMessageId?: string;
-  parentSessionId?: string;
-}
-const pendingSpawns = new Map<string, SpawnInfo[]>();
-
-// Track active spawns by sessionId for completion updates
-const activeSpawns = new Map<string, SpawnInfo>();
-
-// Track pending spawns per CALLER session (not parent)
-// When agentA spawns agentB, we track that agentA has a pending spawn
-// This allows us to keep agentA alive until agentB completes
-// Key: caller session ID, Value: Set of spawned session IDs
-const callerPendingSpawns = new Map<string, Set<string>>();
-
-// ============================================================================
-// Session State Tracking (for broadcast resumption)
-// ============================================================================
-
-interface SessionState {
-  sessionId: string;
-  alias: string;
-  status: "active" | "idle";
-  lastActivity: number;
-}
-
-// Track session states for resumption
-const sessionStates = new Map<string, SessionState>();
-
-// Store the client reference for resumption calls
-let storedClient: OpenCodeSessionClient | null = null;
-
-// ============================================================================
-// Cleanup - prevent memory leaks
-// ============================================================================
-
-function cleanupExpiredMessages(): void {
-  const now = Date.now();
-  let totalRemoved = 0;
-
-  for (const [sessionId, messages] of inboxes) {
-    const before = messages.length;
-
-    // Remove expired messages based on handled status
-    const filtered = messages.filter((m: Message) => {
-      if (m.handled) {
-        return now - m.timestamp < MESSAGE_TTL_MS;
-      }
-      // Keep unhandled messages much longer
-      return now - m.timestamp < UNHANDLED_TTL_MS;
-    });
-
-    // Trim to max size if needed
-    if (filtered.length > MAX_INBOX_SIZE) {
-      const unhandled = filtered.filter((m: Message) => !m.handled);
-      const handled = filtered.filter((m: Message) => m.handled);
-      handled.sort((a: Message, b: Message) => b.timestamp - a.timestamp);
-
-      if (unhandled.length > MAX_INBOX_SIZE) {
-        unhandled.sort((a: Message, b: Message) => b.timestamp - a.timestamp);
-        inboxes.set(sessionId, unhandled.slice(0, MAX_INBOX_SIZE));
-        totalRemoved += before - MAX_INBOX_SIZE;
-      } else {
-        const kept = [
-          ...unhandled,
-          ...handled.slice(0, MAX_INBOX_SIZE - unhandled.length),
-        ];
-        inboxes.set(sessionId, kept);
-        totalRemoved += before - kept.length;
-      }
-    } else {
-      inboxes.set(sessionId, filtered);
-      totalRemoved += before - filtered.length;
-    }
-
-    // Remove empty queues
-    if (inboxes.get(sessionId)!.length === 0) {
-      inboxes.delete(sessionId);
-    }
-  }
-
-  // DORMANT: parent alias feature
-  // Cleanup expired parent cache entries
-  for (const [sessionId, cached] of sessionParentCache) {
-    if (now - cached.cachedAt > PARENT_CACHE_TTL_MS) {
-      sessionParentCache.delete(sessionId);
-    }
-  }
-
-  if (totalRemoved > 0) {
-    log.debug(LOG.MESSAGE, `Cleanup removed ${totalRemoved} expired messages`);
-  }
-}
-
-// Start cleanup interval
-setInterval(cleanupExpiredMessages, CLEANUP_INTERVAL_MS);
-
-// ============================================================================
-// Alias management
-// ============================================================================
-
-function getNextAlias(): string {
-  const index = nextAgentIndex;
-  nextAgentIndex++;
-
-  const letter = String.fromCharCode(CHAR_CODE_A + (index % ALPHABET_SIZE));
-  const suffix =
-    index >= ALPHABET_SIZE ? Math.floor(index / ALPHABET_SIZE).toString() : "";
-  return `agent${letter}${suffix}`;
-}
-
-function getAlias(sessionId: string): string {
-  return sessionToAlias.get(sessionId) || sessionId;
-}
-
-function setDescription(sessionId: string, description: string): void {
-  const alias = getAlias(sessionId);
-  const truncated = description.substring(0, MAX_DESCRIPTION_LENGTH);
-  agentDescriptions.set(alias, truncated);
-  log.info(LOG.SESSION, `Agent announced`, { alias, description: truncated });
-}
-
-function getDescription(alias: string): string | undefined {
-  return agentDescriptions.get(alias);
-}
-
-function resolveAlias(
-  aliasOrSessionId: string,
-  // DORMANT: parent alias feature
-  parentId?: string | null,
-): string | undefined {
-  // Handle special "parent" alias (DORMANT)
-  if (aliasOrSessionId === "parent" && parentId) {
-    return parentId;
-  }
-  // Try alias first, then assume it's a session ID
-  return (
-    aliasToSession.get(aliasOrSessionId) ||
-    (activeSessions.has(aliasOrSessionId) ? aliasOrSessionId : undefined)
-  );
-}
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 10);
-}
-
-function getNextMsgIndex(sessionId: string): number {
-  const current = sessionMsgCounter.get(sessionId) || 0;
-  const next = current + 1;
-  sessionMsgCounter.set(sessionId, next);
-  return next;
-}
-
-function getInbox(sessionId: string): Message[] {
-  if (!inboxes.has(sessionId)) {
-    inboxes.set(sessionId, []);
-  }
-  return inboxes.get(sessionId)!;
-}
-
-// ============================================================================
-// Core messaging functions
-// ============================================================================
-
-function sendMessage(from: string, to: string, body: string): Message {
-  const message: Message = {
-    id: generateId(),
-    msgIndex: getNextMsgIndex(to),
-    from,
-    to,
-    body,
-    timestamp: Date.now(),
-    handled: false,
-  };
-
-  const queue = getInbox(to);
-
-  // Enforce max queue size
-  if (queue.length >= MAX_INBOX_SIZE) {
-    // Remove oldest handled message, or oldest message if all unhandled
-    const handledIndex = queue.findIndex((m) => m.handled);
-    if (handledIndex !== -1) {
-      queue.splice(handledIndex, 1);
-    } else {
-      queue.shift();
-    }
-    log.warn(LOG.MESSAGE, `Queue full, removed oldest message`, { to });
-  }
-
-  queue.push(message);
-  log.info(LOG.MESSAGE, `Message sent`, {
-    id: message.id,
-    msgIndex: message.msgIndex,
-    from,
-    to,
-    bodyLength: body.length,
-  });
-  return message;
-}
-
-/**
- * Resume an idle session by sending a broadcast message as a user prompt.
- * This "wakes up" the idle agent to process the message.
- */
-async function resumeSessionWithBroadcast(
-  recipientSessionId: string,
-  senderAlias: string,
-  messageContent: string,
-): Promise<boolean> {
-  if (!storedClient) {
-    log.warn(LOG.MESSAGE, `Cannot resume session - no client available`);
-    return false;
-  }
-
-  const recipientAlias = sessionToAlias.get(recipientSessionId) || "unknown";
-
-  log.info(LOG.MESSAGE, `Resuming idle session with broadcast`, {
-    recipientSessionId,
-    recipientAlias,
-    senderAlias,
-    messageLength: messageContent.length,
-  });
-
-  try {
-    // Format the resume prompt - DON'T include full message content
-    // because the synthetic injection will show it. Just notify that new messages arrived.
-    const resumePrompt = `[Broadcast from ${senderAlias}]: New message received. Check your inbox.`;
-
-    // Mark session as active before resuming
-    const state = sessionStates.get(recipientSessionId);
-    if (state) {
-      state.status = "active";
-      state.lastActivity = Date.now();
-    }
-
-    log.info(LOG.MESSAGE, `Session resumed successfully`, {
-      recipientSessionId,
-      recipientAlias,
-    });
-
-    // Fire off the resume in the background but track its completion
-    // We use prompt() (not promptAsync) and await it so we know when it finishes
-    // This is wrapped in an IIFE so we don't block the caller
-    (async () => {
-      try {
-        await storedClient!.session.prompt({
-          path: { id: recipientSessionId },
-          body: {
-            parts: [{ type: "text", text: resumePrompt }],
-          },
-        });
-
-        // Mark session as idle after prompt completes
-        const stateAfter = sessionStates.get(recipientSessionId);
-        if (stateAfter) {
-          stateAfter.status = "idle";
-          stateAfter.lastActivity = Date.now();
-        }
-
-        log.info(LOG.MESSAGE, `Resumed session completed, marked idle`, {
-          recipientSessionId,
-          recipientAlias,
-        });
-
-        // Check for messages that need resumption (unhandled AND not presented)
-        const unreadMessages = getMessagesNeedingResume(recipientSessionId);
-        if (unreadMessages.length > 0) {
-          log.info(
-            LOG.MESSAGE,
-            `Resumed session has new unread messages, resuming again`,
-            {
-              recipientSessionId,
-              recipientAlias,
-              unreadCount: unreadMessages.length,
-            },
-          );
-
-          // Resume with the first unread message
-          const firstUnread = unreadMessages[0];
-          const senderAlias = firstUnread.from;
-
-          // Mark this message as presented BEFORE resuming to avoid infinite loop
-          markMessagesAsPresented(recipientSessionId, [firstUnread.msgIndex]);
-
-          await resumeSessionWithBroadcast(
-            recipientSessionId,
-            senderAlias,
-            firstUnread.body,
-          );
-        }
-      } catch (e) {
-        log.error(LOG.MESSAGE, `Resumed session failed`, {
-          recipientSessionId,
-          error: String(e),
-        });
-        // Mark as idle on error too
-        const stateErr = sessionStates.get(recipientSessionId);
-        if (stateErr) {
-          stateErr.status = "idle";
-        }
-      }
-    })();
-
-    return true;
-  } catch (e) {
-    log.error(LOG.MESSAGE, `Failed to resume session`, {
-      recipientSessionId,
-      error: String(e),
-    });
-    return false;
-  }
-}
-
-function getUnhandledMessages(sessionId: string): Message[] {
-  return getInbox(sessionId).filter((m) => !m.handled);
-}
-
-/**
- * Get messages that need resumption: unhandled AND not presented via transform.
- * - Unhandled: agent didn't use reply_to to respond
- * - Not presented: agent didn't see the message in their context (via transform injection)
- * Only these messages should trigger a resume - they're truly "unseen" by the agent.
- */
-function getMessagesNeedingResume(sessionId: string): Message[] {
-  const unhandled = getUnhandledMessages(sessionId);
-  const presented = presentedMessages.get(sessionId);
-  if (!presented || presented.size === 0) {
-    return unhandled; // No messages were presented, all unhandled need resume
-  }
-  // Filter out messages that were already presented to the agent
-  return unhandled.filter((m) => !presented.has(m.msgIndex));
-}
-
-function markMessagesAsHandled(
-  sessionId: string,
-  msgIndices: number[],
-): HandledMessage[] {
-  const queue = getInbox(sessionId);
-  const handled: HandledMessage[] = [];
-  for (const msg of queue) {
-    if (msgIndices.includes(msg.msgIndex) && !msg.handled) {
-      msg.handled = true;
-      handled.push({
-        id: msg.msgIndex,
-        from: msg.from,
-        body: msg.body,
-      });
-      log.info(LOG.MESSAGE, `Message marked as handled`, {
-        sessionId,
-        msgIndex: msg.msgIndex,
-        from: msg.from,
-      });
-    }
-  }
-  return handled;
-}
-
-function markMessagesAsPresented(sessionId: string, msgIndices: number[]) {
-  let presented = presentedMessages.get(sessionId);
-  if (!presented) {
-    presented = new Set();
-    presentedMessages.set(sessionId, presented);
-  }
-  for (const idx of msgIndices) {
-    presented.add(idx);
-  }
-  log.debug(LOG.MESSAGE, `Marked messages as presented (seen by agent)`, {
-    sessionId,
-    indices: msgIndices,
-  });
-}
-
-function getKnownAliases(sessionId: string): string[] {
-  const selfAlias = sessionToAlias.get(sessionId);
-  const agents: string[] = [];
-  for (const alias of aliasToSession.keys()) {
-    if (alias !== selfAlias) {
-      agents.push(alias);
-    }
-  }
-  return agents;
-}
-
-function getParallelAgents(sessionId: string): ParallelAgent[] {
-  const selfAlias = sessionToAlias.get(sessionId);
-  const agents: ParallelAgent[] = [];
-  for (const [alias, sessId] of aliasToSession.entries()) {
-    // All registered sessions are child sessions (we check parentID before registering)
-    // Just exclude self
-    if (alias !== selfAlias) {
-      agents.push({
-        alias,
-        description: getDescription(alias),
-      });
-    }
-  }
-  return agents;
-}
-
-function registerSession(sessionId: string): void {
-  if (activeSessions.has(sessionId)) {
-    return;
-  }
-
-  if (registeringSessionsLock.has(sessionId)) {
-    return;
-  }
-
-  registeringSessionsLock.add(sessionId);
-
-  try {
-    if (!activeSessions.has(sessionId)) {
-      activeSessions.add(sessionId);
-      const alias = getNextAlias();
-      sessionToAlias.set(sessionId, alias);
-      aliasToSession.set(alias, sessionId);
-      log.info(LOG.SESSION, `Session registered`, {
-        sessionId,
-        alias,
-        totalSessions: activeSessions.size,
-      });
-    }
-  } finally {
-    registeringSessionsLock.delete(sessionId);
-  }
-}
-
-// ============================================================================
-// Session utils
-// ============================================================================
-
-// DORMANT: parent alias feature
-async function getParentId(
-  client: OpenCodeSessionClient,
-  sessionId: string,
-): Promise<string | null> {
-  const now = Date.now();
-
-  const cached = sessionParentCache.get(sessionId);
-  if (cached && now - cached.cachedAt < PARENT_CACHE_TTL_MS) {
-    return cached.value;
-  }
-
-  try {
-    const response = await client.session.get({ path: { id: sessionId } });
-    const parentId = response.data?.parentID || null;
-    sessionParentCache.set(sessionId, { value: parentId, cachedAt: now });
-    log.debug(LOG.SESSION, `Looked up parentID`, { sessionId, parentId });
-    return parentId;
-  } catch (e) {
-    log.warn(LOG.SESSION, `Failed to get session info`, {
-      sessionId,
-      error: String(e),
-    });
-    sessionParentCache.set(sessionId, {
-      value: null,
-      cachedAt: now - PARENT_CACHE_TTL_MS + 60000,
-    });
-    return null;
-  }
-}
-
-/**
- * Check if a session is a child session (has parentID).
- * Uses cache for fast repeated checks.
- */
-async function isChildSession(
-  client: OpenCodeSessionClient,
-  sessionId: string,
-): Promise<boolean> {
-  // Fast path: already confirmed as child session
-  if (childSessionCache.has(sessionId)) {
-    return true;
-  }
-
-  const parentId = await getParentId(client, sessionId);
-  if (parentId) {
-    childSessionCache.add(sessionId);
-    return true;
-  }
-  return false;
-}
-
-// ============================================================================
-// Helper to create bundled assistant message with inbox
-// ============================================================================
-
-interface AssistantMessage {
-  info: {
-    id: string;
-    sessionID: string;
-    role: string;
-    agent: string;
-    parentID: string;
-    modelID: string;
-    providerID: string;
-    mode: string;
-    path: { cwd: string; root: string };
-    time: { created: number; completed: number };
-    cost: number;
-    tokens: {
-      input: number;
-      output: number;
-      reasoning: number;
-      cache: { read: number; write: number };
-    };
-    variant?: unknown;
-  };
-  parts: Array<{
-    id: string;
-    sessionID: string;
-    messageID: string;
-    type: string;
-    callID: string;
-    tool: string;
-    state: {
-      status: string;
-      input: Record<string, unknown>;
-      output: string;
-      title: string;
-      metadata: Record<string, unknown>;
-      time: { start: number; end: number };
-    };
-  }>;
-}
-
-function createInboxMessage(
-  sessionId: string,
-  messages: Message[],
-  baseUserMessage: UserMessage,
-  parallelAgents: ParallelAgent[],
-  hasAnnounced: boolean,
-): AssistantMessage {
-  const now = Date.now();
-  const userInfo = baseUserMessage.info;
-
-  // Build structured output - this is what the LLM sees as the "tool result"
-  // Agents section shows available agents and their status (not replyable)
-  // Messages section shows replyable messages
-  const outputData: {
-    hint?: string;
-    agents?: Array<{ name: string; status?: string }>;
-    messages?: Array<{ id: number; from: string; content: string }>;
-  } = {};
-
-  // Add hint for unannounced agents
-  if (!hasAnnounced) {
-    outputData.hint =
-      'ACTION REQUIRED: Announce yourself to other agents by calling broadcast(message="what you\'re working on")';
-  }
-
-  // Build agents section from parallelAgents (status comes from agentDescriptions)
-  if (parallelAgents.length > 0) {
-    outputData.agents = parallelAgents.map((agent) => ({
-      name: agent.alias,
-      status: agent.description,
-    }));
-  }
-
-  // All messages in inbox are regular messages (replyable)
-  if (messages.length > 0) {
-    outputData.messages = messages.map((m) => ({
-      id: m.msgIndex,
-      from: m.from,
-      content: m.body,
-    }));
-  }
-
-  const assistantMessageId = `msg_broadcast_${now}`;
-  const partId = `prt_broadcast_${now}`;
-  const callId = `call_broadcast_${now}`;
-
-  // Build short title for UI display
-  const titleParts: string[] = [];
-  if (parallelAgents.length > 0) {
-    titleParts.push(`${parallelAgents.length} agent(s)`);
-  }
-  if (messages.length > 0) {
-    titleParts.push(`${messages.length} message(s)`);
-  }
-  const title = titleParts.length > 0 ? titleParts.join(", ") : "Inbox";
-
-  // Output is the structured data the LLM sees
-  const output = JSON.stringify(outputData);
-
-  log.info(LOG.MESSAGE, `Creating inbox injection`, {
-    sessionId,
-    agents: parallelAgents.map((a) => a.alias),
-    agentStatuses: parallelAgents.map((a) => a.description?.substring(0, 50)),
-    messageIds: messages.map((m) => m.msgIndex),
-    messageFroms: messages.map((m) => m.from),
-  });
-
-  const result: AssistantMessage = {
-    info: {
-      id: assistantMessageId,
-      sessionID: sessionId,
-      role: "assistant",
-      agent: userInfo.agent || "code",
-      parentID: userInfo.id,
-      modelID: userInfo.model?.modelID || DEFAULT_MODEL_ID,
-      providerID: userInfo.model?.providerID || DEFAULT_PROVIDER_ID,
-      mode: "default",
-      path: { cwd: "/", root: "/" },
-      time: { created: now, completed: now },
-      cost: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-        cache: { read: 0, write: 0 },
-      },
-    },
-    parts: [
-      {
-        id: partId,
-        sessionID: sessionId,
-        messageID: assistantMessageId,
-        type: "tool",
-        callID: callId,
-        tool: "broadcast",
-        state: {
-          status: "completed",
-          input: { synthetic: true }, // Hints this was injected by Pocket Universe, not a real agent call
-          output,
-          title,
-          metadata: {
-            incoming_message: messages.length > 0,
-            message_count: messages.length,
-            agent_count: parallelAgents.length,
-          },
-          time: { start: now, end: now },
-        },
-      },
-    ],
-  };
-
-  if (userInfo.variant !== undefined) {
-    result.info.variant = userInfo.variant;
-  }
-
-  return result;
-}
-
-/**
- * Create a synthetic task tool message to inject into parent session
- * This makes spawned sessions appear as task tool calls in the parent's history
- */
-function createSpawnTaskMessage(
-  parentSessionId: string,
-  spawn: SpawnInfo,
-  baseUserMessage: UserMessage,
-): AssistantMessage {
-  const now = Date.now();
-  const userInfo = baseUserMessage.info;
-
-  const assistantMessageId = `msg_spwn_${spawn.sessionId.slice(-12)}`;
-  const partId = `prt_spwn_${spawn.sessionId.slice(-12)}`;
-  const callId = `call_spwn_${spawn.sessionId.slice(-12)}`;
-
-  // Build output similar to what task tool produces
-  const output = `Spawned agent ${spawn.alias} is running.
-Task: ${spawn.description}
-
-<task_metadata>
-session_id: ${spawn.sessionId}
-</task_metadata>`;
-
-  log.info(LOG.MESSAGE, `Creating synthetic task injection`, {
-    parentSessionId,
-    spawnAlias: spawn.alias,
-    spawnSessionId: spawn.sessionId,
-  });
-
-  const result: AssistantMessage = {
-    info: {
-      id: assistantMessageId,
-      sessionID: parentSessionId,
-      role: "assistant",
-      agent: userInfo.agent || "code",
-      parentID: userInfo.id,
-      modelID: userInfo.model?.modelID || DEFAULT_MODEL_ID,
-      providerID: userInfo.model?.providerID || DEFAULT_PROVIDER_ID,
-      mode: "default",
-      path: { cwd: "/", root: "/" },
-      time: { created: spawn.timestamp, completed: now },
-      cost: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-        cache: { read: 0, write: 0 },
-      },
-    },
-    parts: [
-      {
-        id: partId,
-        sessionID: parentSessionId,
-        messageID: assistantMessageId,
-        type: "tool",
-        callID: callId,
-        tool: "task",
-        state: {
-          status: "completed",
-          input: {
-            description: spawn.description,
-            prompt: spawn.prompt,
-            subagent_type: "general",
-            synthetic: true, // Indicates this was spawned by Pocket Universe
-          },
-          output,
-          title: spawn.description,
-          metadata: {
-            sessionId: spawn.sessionId,
-            spawned_by_pocket_universe: true,
-          },
-          time: { start: spawn.timestamp, end: now },
-        },
-      },
-    ],
-  };
-
-  if (userInfo.variant !== undefined) {
-    result.info.variant = userInfo.variant;
-  }
-
-  return result;
-}
-
-/**
- * Inject a task tool part directly into the parent session's message history.
- * This makes the spawned task visible in the TUI immediately.
- * Uses the internal HTTP client (client.client) to PATCH the part.
- */
-async function injectTaskPartToParent(
-  client: OpenCodeSessionClient,
-  parentSessionId: string,
-  spawn: SpawnInfo,
-): Promise<boolean> {
-  try {
-    // Step 1: Get messages from parent session to find an existing assistant message
-    const messagesResult = await client.session.messages({
-      path: { id: parentSessionId },
-    });
-
-    const messages = messagesResult.data;
-    if (!messages || messages.length === 0) {
-      log.warn(LOG.TOOL, `No messages found in parent session`, {
-        parentSessionId,
-      });
-      return false;
-    }
-
-    // Find the last assistant message to attach to
-    const lastAssistantMsg = [...messages]
-      .reverse()
-      .find((m) => m.info.role === "assistant");
-
-    if (!lastAssistantMsg) {
-      log.warn(LOG.TOOL, `No assistant message found in parent session`, {
-        parentSessionId,
-      });
-      return false;
-    }
-
-    const messageId = lastAssistantMsg.info.id;
-    const now = Date.now();
-
-    // Step 2: Create the task tool part (NOT synthetic - visible in TUI)
-    const partId = `prt_spwn_${spawn.sessionId.slice(-12)}_${now}`;
-    const callId = `call_spwn_${spawn.sessionId.slice(-12)}`;
-
-    // Store part info in spawn for later completion update
-    spawn.partId = partId;
-    spawn.parentMessageId = messageId;
-    spawn.parentSessionId = parentSessionId;
-
-    const taskPart = {
-      id: partId,
-      sessionID: parentSessionId,
-      messageID: messageId,
-      type: "tool",
-      callID: callId,
-      tool: "task",
-      state: {
-        status: "running", // Show as running since it's executing in parallel
-        input: {
-          description: spawn.description,
-          prompt: spawn.prompt,
-          subagent_type: "general",
-        },
-        output: `Spawned agent ${spawn.alias} is running in parallel.\nSession: ${spawn.sessionId}`,
-        title: spawn.description,
-        metadata: {
-          sessionId: spawn.sessionId,
-          spawned_by_pocket_universe: true,
-        },
-        time: { start: spawn.timestamp, end: 0 }, // end=0 indicates still running
-      },
-    };
-
-    log.info(LOG.TOOL, `Injecting task part to parent`, {
-      parentSessionId,
-      messageId,
-      partId,
-      spawnAlias: spawn.alias,
-    });
-
-    // Step 3: PATCH the part to the parent session using internal HTTP client
-    const httpClient = (client as unknown as { client?: InternalClient })
-      .client;
-    if (!httpClient?.patch) {
-      // Try alternative access pattern
-      const altClient = (client as unknown as { _client?: InternalClient })
-        ._client;
-      if (altClient?.patch) {
-        await (altClient as any).patch({
-          url: `/session/${parentSessionId}/message/${messageId}/part/${partId}`,
-          body: taskPart,
-        });
-        log.info(LOG.TOOL, `Task part injected via _client.patch`, {
-          partId,
-          spawnAlias: spawn.alias,
-        });
-        return true;
-      }
-      log.warn(LOG.TOOL, `No HTTP client available for PATCH`, {
-        clientKeys: Object.keys(client),
-      });
-      return false;
-    }
-
-    await (httpClient as any).patch({
-      url: `/session/${parentSessionId}/message/${messageId}/part/${partId}`,
-      body: taskPart,
-    });
-
-    log.info(LOG.TOOL, `Task part injected successfully`, {
-      partId,
-      spawnAlias: spawn.alias,
-    });
-    return true;
-  } catch (e) {
-    log.error(LOG.TOOL, `Failed to inject task part`, {
-      parentSessionId,
-      spawnAlias: spawn.alias,
-      error: String(e),
-    });
-    return false;
-  }
-}
-
-/**
- * Get the parent ID for a spawned session.
- * Spawned sessions are children of the main session (grandparent of caller).
- */
-async function getParentIdForSpawn(
-  client: OpenCodeSessionClient,
-  spawnedSessionId: string,
-): Promise<string | null> {
-  try {
-    const response = await client.session.get({
-      path: { id: spawnedSessionId },
-    });
-    return response.data?.parentID || null;
-  } catch (e) {
-    log.warn(LOG.SESSION, `Failed to get parent ID for spawned session`, {
-      spawnedSessionId,
-      error: String(e),
-    });
-    return null;
-  }
-}
-
-/**
- * Fetch the actual output from a spawned session.
- * Mimics how the native Task tool extracts the last text part.
- */
-async function fetchSpawnOutput(
-  client: OpenCodeSessionClient,
-  sessionId: string,
-  alias: string,
-): Promise<string> {
-  try {
-    const messagesResult = await client.session.messages({
-      path: { id: sessionId },
-    });
-
-    const messages = messagesResult.data;
-    if (!messages || messages.length === 0) {
-      log.warn(LOG.TOOL, `No messages found in spawned session`, {
-        sessionId,
-        alias,
-      });
-      return `Agent ${alias} completed.\nSession: ${sessionId}`;
-    }
-
-    // Find assistant messages and extract text parts (like native Task tool does)
-    const assistantMessages = messages.filter(
-      (m) => m.info.role === "assistant",
-    );
-
-    if (assistantMessages.length === 0) {
-      log.warn(LOG.TOOL, `No assistant messages in spawned session`, {
-        sessionId,
-        alias,
-      });
-      return `Agent ${alias} completed.\nSession: ${sessionId}`;
-    }
-
-    // Get the last assistant message
-    const lastAssistant = assistantMessages[assistantMessages.length - 1];
-    const parts = lastAssistant.parts || [];
-
-    // Find the last text part (like native Task tool: result.parts.findLast(x => x.type === "text"))
-    const textParts = parts.filter(
-      (p: unknown) => (p as { type?: string }).type === "text",
-    );
-    const lastTextPart = textParts[textParts.length - 1] as
-      | { text?: string }
-      | undefined;
-    const text = lastTextPart?.text || "";
-
-    if (text) {
-      log.info(LOG.TOOL, `Extracted output from spawned session`, {
-        sessionId,
-        alias,
-        textLength: text.length,
-      });
-      // Format like native Task tool does
-      return (
-        text +
-        "\n\n<task_metadata>\nsession_id: " +
-        sessionId +
-        "\n</task_metadata>"
-      );
-    }
-
-    // Fallback: summarize tool calls if no text
-    const toolParts = parts.filter(
-      (p: unknown) => (p as { type?: string }).type === "tool",
-    );
-    if (toolParts.length > 0) {
-      const summary = toolParts
-        .map((p: unknown) => {
-          const part = p as { tool?: string; state?: { title?: string } };
-          return `- ${part.tool}: ${part.state?.title || "completed"}`;
-        })
-        .join("\n");
-      return `Agent ${alias} completed:\n${summary}\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
-    }
-
-    return `Agent ${alias} completed.\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
-  } catch (e) {
-    log.error(LOG.TOOL, `Failed to fetch spawn output`, {
-      sessionId,
-      alias,
-      error: String(e),
-    });
-    return `Agent ${alias} completed.\nSession: ${sessionId}`;
-  }
-}
-
-/**
- * Mark a spawned task as completed in the parent session's TUI.
- * Updates the task part status from "running" to "completed".
- */
-async function markSpawnCompleted(
-  client: OpenCodeSessionClient,
-  spawn: SpawnInfo,
-  output?: string,
-): Promise<boolean> {
-  if (!spawn.partId || !spawn.parentMessageId || !spawn.parentSessionId) {
-    log.warn(LOG.TOOL, `Cannot mark spawn completed - missing part info`, {
-      alias: spawn.alias,
-      hasPartId: !!spawn.partId,
-      hasMessageId: !!spawn.parentMessageId,
-      hasSessionId: !!spawn.parentSessionId,
-    });
-    return false;
-  }
-
-  // Fetch actual output from the spawned session if not provided
-  let finalOutput = output;
-  if (!finalOutput) {
-    finalOutput = await fetchSpawnOutput(client, spawn.sessionId, spawn.alias);
-  }
-
-  const now = Date.now();
-
-  // If we don't have part info (no immediate injection was done), inject now
-  if (!spawn.partId || !spawn.parentMessageId || !spawn.parentSessionId) {
-    // Get the parent session ID from the spawned session
-    const parentId =
-      spawn.parentSessionId ||
-      (await getParentIdForSpawn(client, spawn.sessionId));
-    if (!parentId) {
-      log.warn(LOG.TOOL, `Cannot mark spawn completed - no parent session`, {
-        alias: spawn.alias,
-      });
-      return false;
-    }
-
-    // Get the last assistant message to attach the completed part
-    const messagesResult = await client.session.messages({
-      path: { id: parentId },
-    });
-
-    const messages = messagesResult.data;
-    if (!messages || messages.length === 0) {
-      log.warn(
-        LOG.TOOL,
-        `No messages in parent session for completion injection`,
-        {
-          parentId,
-          alias: spawn.alias,
-        },
-      );
-      return false;
-    }
-
-    const lastAssistantMsg = [...messages]
-      .reverse()
-      .find((m) => m.info.role === "assistant");
-
-    if (!lastAssistantMsg) {
-      log.warn(LOG.TOOL, `No assistant message for completion injection`, {
-        parentId,
-        alias: spawn.alias,
-      });
-      return false;
-    }
-
-    // Set the part info for this completion
-    spawn.partId = `prt_spwn_${spawn.sessionId.slice(-12)}_${now}`;
-    spawn.parentMessageId = lastAssistantMsg.info.id;
-    spawn.parentSessionId = parentId;
-  }
-
-  const completedPart = {
-    id: spawn.partId,
-    sessionID: spawn.parentSessionId,
-    messageID: spawn.parentMessageId,
-    type: "tool",
-    callID: `call_spwn_${spawn.sessionId.slice(-12)}`,
-    tool: "task",
-    state: {
-      status: "completed",
-      input: {
-        description: spawn.description,
-        prompt: spawn.prompt,
-        subagent_type: "general",
-      },
-      output: finalOutput,
-      title: spawn.description,
-      metadata: {
-        sessionId: spawn.sessionId,
-        spawned_by_pocket_universe: true,
-      },
-      time: { start: spawn.timestamp, end: now },
-    },
-  };
-
-  try {
-    const httpClient = (client as unknown as { client?: InternalClient })
-      .client;
-    const altClient = (client as unknown as { _client?: InternalClient })
-      ._client;
-    const patchClient = httpClient?.patch
-      ? httpClient
-      : altClient?.patch
-        ? altClient
-        : null;
-
-    if (!patchClient?.patch) {
-      log.warn(LOG.TOOL, `No HTTP client for marking spawn completed`);
-      return false;
-    }
-
-    await patchClient.patch({
-      url: `/session/${spawn.parentSessionId}/message/${spawn.parentMessageId}/part/${spawn.partId}`,
-      body: completedPart,
-    });
-
-    log.info(LOG.TOOL, `Spawn marked as completed`, {
-      alias: spawn.alias,
-      partId: spawn.partId,
-    });
-
-    // Clean up from active spawns
-    activeSpawns.delete(spawn.sessionId);
-    return true;
-  } catch (e) {
-    log.error(LOG.TOOL, `Failed to mark spawn completed`, {
-      alias: spawn.alias,
-      error: String(e),
-    });
-    return false;
-  }
-}
+import type {
+  OpenCodeSessionClient,
+  ToolContext,
+  ToolExecuteInput,
+  ToolExecuteOutput,
+  SystemTransformInput,
+  SystemTransformOutput,
+  MessagesTransformOutput,
+  ConfigTransformOutput,
+  UserMessage,
+  SpawnInfo,
+  InternalClient,
+} from "./types";
+import {
+  sessionToAlias,
+  aliasToSession,
+  sessionStates,
+  announcedSessions,
+  pendingTaskDescriptions,
+  pendingSpawns,
+  activeSpawns,
+  callerPendingSpawns,
+  setStoredClient,
+  getAlias,
+  setDescription,
+  resolveAlias,
+  registerSession,
+  MAX_MESSAGE_LENGTH,
+} from "./state";
+import {
+  sendMessage,
+  resumeSessionWithBroadcast,
+  getUnhandledMessages,
+  getMessagesNeedingResume,
+  markMessagesAsHandled,
+  markMessagesAsPresented,
+  getKnownAliases,
+  getParallelAgents,
+  getParentId,
+  isChildSession,
+  createInboxMessage,
+  createSpawnTaskMessage,
+  injectTaskPartToParent,
+  fetchSpawnOutput,
+  markSpawnCompleted,
+} from "./messaging";
 
 // ============================================================================
 // Plugin
@@ -1328,10 +68,9 @@ async function markSpawnCompleted(
 const plugin: Plugin = async (ctx) => {
   log.info(LOG.HOOK, "Plugin initialized");
   const client = ctx.client as unknown as OpenCodeSessionClient;
-  const serverUrl = ctx.serverUrl; // Server URL for raw fetch calls
 
   // Store client for resumption calls
-  storedClient = client;
+  setStoredClient(client);
 
   return {
     // Allow main session to wait for spawned grandchild sessions AND resumed sessions
@@ -1381,9 +120,9 @@ const plugin: Plugin = async (ctx) => {
         iteration++;
 
         // 1. Check for pending spawns
-        const pendingSpawns = callerPendingSpawns.get(input.sessionID);
-        if (pendingSpawns && pendingSpawns.size > 0) {
-          const spawnIds = Array.from(pendingSpawns);
+        const pending = callerPendingSpawns.get(input.sessionID);
+        if (pending && pending.size > 0) {
+          const spawnIds = Array.from(pending);
           log.info(
             LOG.SESSION,
             `session.before_complete: waiting for spawns (iteration ${iteration})`,
@@ -1408,11 +147,11 @@ const plugin: Plugin = async (ctx) => {
 
           // Remove truly done spawns
           for (const doneId of doneSpawns) {
-            pendingSpawns.delete(doneId);
+            pending.delete(doneId);
           }
 
           // If pendingSpawns is empty, clean up the map entry
-          if (pendingSpawns.size === 0) {
+          if (pending.size === 0) {
             callerPendingSpawns.delete(input.sessionID);
           }
 
@@ -1421,7 +160,7 @@ const plugin: Plugin = async (ctx) => {
             alias,
             totalSpawns: spawnIds.length,
             doneSpawns: doneSpawns.length,
-            remainingSpawns: pendingSpawns.size,
+            remainingSpawns: pending.size,
           });
 
           // Continue loop to check for messages that may have arrived
@@ -1481,14 +220,12 @@ const plugin: Plugin = async (ctx) => {
     "session.idle": async ({ sessionID }: { sessionID: string }) => {
       // Check if this is a registered Pocket Universe session (child session)
       const alias = sessionToAlias.get(sessionID);
-      const isRegistered = activeSessions.has(sessionID);
       const hasPendingSpawns = callerPendingSpawns.has(sessionID);
       const pendingCount = callerPendingSpawns.get(sessionID)?.size || 0;
 
       log.info(LOG.SESSION, `session.idle hook fired`, {
         sessionID,
         alias: alias || "unknown",
-        isRegistered,
         hasPendingSpawns,
         pendingSpawnCount: pendingCount,
       });
@@ -1537,20 +274,18 @@ const plugin: Plugin = async (ctx) => {
         const alias = sessionToAlias.get(subtaskSessionId);
         if (alias) {
           // Check if this session has pending spawns
-          const pendingSpawns = callerPendingSpawns.get(subtaskSessionId);
-          if (pendingSpawns && pendingSpawns.size > 0) {
+          const pending = callerPendingSpawns.get(subtaskSessionId);
+          if (pending && pending.size > 0) {
             log.warn(
               LOG.SESSION,
               `Task completing but has pending spawns! Main will continue early.`,
               {
                 subtaskSessionId,
                 alias,
-                pendingSpawnCount: pendingSpawns.size,
-                pendingSpawnIds: Array.from(pendingSpawns),
+                pendingSpawnCount: pending.size,
+                pendingSpawnIds: Array.from(pending),
               },
             );
-            // TODO: Find a way to prevent this - main session will continue
-            // before spawned agents complete
           }
 
           sessionStates.set(subtaskSessionId, {
@@ -1566,8 +301,6 @@ const plugin: Plugin = async (ctx) => {
 
           // Check if there are unread messages for this session
           // If so, resume the session so it can process them
-          // This handles the race condition where a message arrives
-          // after the session's last transform but before it completes
           const unreadMessages = getMessagesNeedingResume(subtaskSessionId);
           if (unreadMessages.length > 0) {
             log.info(
@@ -1623,7 +356,6 @@ const plugin: Plugin = async (ctx) => {
           const sessionId = context.sessionID;
 
           // Check if this is the first broadcast call (agent announcing themselves)
-          // This is separate from session registration which happens earlier in system.transform
           const isFirstCall = !announcedSessions.has(sessionId);
 
           // Register if not already (should already be registered via system.transform)
@@ -1670,9 +402,6 @@ const plugin: Plugin = async (ctx) => {
 
             const knownAgents = getKnownAliases(sessionId);
 
-            // Status is now stored in agentDescriptions - no need to send as message
-            // Other agents will see it via parallelAgents in the synthetic injection
-
             log.info(LOG.TOOL, `First broadcast - status announcement`, {
               alias,
               status: messageContent.substring(0, 80),
@@ -1680,7 +409,6 @@ const plugin: Plugin = async (ctx) => {
             });
 
             // Check if any discovered agents are idle and resume them
-            // so they can see this new agent's announcement
             for (const knownAlias of knownAgents) {
               const knownSessionId = aliasToSession.get(knownAlias);
               if (knownSessionId) {
@@ -1697,7 +425,7 @@ const plugin: Plugin = async (ctx) => {
                   resumeSessionWithBroadcast(
                     knownSessionId,
                     alias,
-                    messageContent, // Just the message, no "[New agent joined]" prefix
+                    messageContent,
                   ).catch((e) =>
                     log.error(LOG.TOOL, `Failed to resume on announcement`, {
                       error: String(e),
@@ -1824,7 +552,6 @@ const plugin: Plugin = async (ctx) => {
           // Check if recipient is idle and resume if so
           const resumedSessions: string[] = [];
 
-          // Debug: log current session states
           log.debug(LOG.TOOL, `Broadcast checking session states`, {
             alias,
             recipientCount: recipientSessions.length,
@@ -1944,11 +671,7 @@ const plugin: Plugin = async (ctx) => {
           });
 
           try {
-            // APPROACH: Create a sibling session and prompt it directly
-            // This makes it run, though it won't appear as a "task" in parent UI
-            // unless we also inject a synthetic task tool result
-
-            // Step 1: Create a sibling session (child of the same parent as caller)
+            // Create a sibling session (child of the same parent as caller)
             const createResult = await client.session.create({
               body: {
                 parentID: parentId,
@@ -1975,8 +698,7 @@ const plugin: Plugin = async (ctx) => {
               parentId,
             });
 
-            // Step 2: Inject task part into parent session BEFORE starting
-            // This makes the spawn visible in the TUI immediately as "running"
+            // Inject task part into parent session BEFORE starting
             const spawnInfo: SpawnInfo = {
               sessionId: newSessionId,
               alias: newAlias,
@@ -1988,7 +710,6 @@ const plugin: Plugin = async (ctx) => {
             };
 
             // Track that the CALLER has a pending spawn
-            // This allows us to keep the caller alive until the spawn completes
             let callerSpawns = callerPendingSpawns.get(sessionId);
             if (!callerSpawns) {
               callerSpawns = new Set();
@@ -2026,9 +747,7 @@ const plugin: Plugin = async (ctx) => {
               });
             }
 
-            // Step 3: Start the session WITHOUT blocking (fire-and-forget)
-            // agentA can continue working while agentB runs in parallel.
-            // When agentB completes, we pipe its output to agentA.
+            // Start the session WITHOUT blocking (fire-and-forget)
             log.info(LOG.TOOL, `spawn starting session (non-blocking)`, {
               newAlias,
               newSessionId,
@@ -2083,22 +802,18 @@ const plugin: Plugin = async (ctx) => {
                   await markSpawnCompleted(client, spawn, spawnOutput);
                 }
 
-                // 5. Pipe the spawn output to the caller (agentA)
-                // If caller is idle: resume with the output
-                // If caller is active: send as broadcast message (will be injected via transform)
+                // 4. Pipe the spawn output to the caller
                 const callerState = sessionStates.get(sessionId);
-                const callerAlias = sessionToAlias.get(sessionId) || "caller";
+                const callerAliasForPipe =
+                  sessionToAlias.get(sessionId) || "caller";
 
-                // 4. DON'T remove from caller's pending spawns yet!
-                // The spawn might get resumed (via broadcast) and spawn more agents.
-                // We'll remove it in session.before_complete when we're truly done.
                 log.info(
                   LOG.TOOL,
                   `spawn completed, still tracked for caller`,
                   {
                     callerSessionId: sessionId,
                     spawnedSessionId: newSessionId,
-                    callerAlias,
+                    callerAlias: callerAliasForPipe,
                   },
                 );
 
@@ -2112,7 +827,7 @@ const plugin: Plugin = async (ctx) => {
                     `Piping spawn output to idle caller via resume`,
                     {
                       callerSessionId: sessionId,
-                      callerAlias,
+                      callerAlias: callerAliasForPipe,
                       spawnAlias: newAlias,
                     },
                   );
@@ -2131,20 +846,19 @@ const plugin: Plugin = async (ctx) => {
                   );
                 } else {
                   // Caller is still active - send as broadcast message
-                  // It will be picked up by the synthetic injection on next LLM call
                   log.info(
                     LOG.TOOL,
                     `Piping spawn output to active caller via message`,
                     {
                       callerSessionId: sessionId,
-                      callerAlias,
+                      callerAlias: callerAliasForPipe,
                       spawnAlias: newAlias,
                     },
                   );
                   sendMessage(newAlias, sessionId, outputMessage);
                 }
 
-                // 6. Check for unread messages and resume spawned session if needed
+                // 5. Check for unread messages and resume spawned session if needed
                 const unreadMessages = getMessagesNeedingResume(newSessionId);
                 if (unreadMessages.length > 0) {
                   log.info(
@@ -2260,7 +974,6 @@ const plugin: Plugin = async (ctx) => {
           // Use the first pending description for this child session
           const description = pending.shift()!;
           setDescription(sessionId, description);
-          // Don't mark as announced - agent should still see the hint to broadcast
 
           log.info(
             LOG.HOOK,
@@ -2312,7 +1025,6 @@ const plugin: Plugin = async (ctx) => {
       const sessionId = lastUserMsg.info.sessionID;
 
       // Check for pending spawns that need to be injected into this session
-      // This works for BOTH main sessions and child sessions
       const spawns = pendingSpawns.get(sessionId) || [];
       const uninjectedSpawns = spawns.filter((s) => !s.injected);
 
@@ -2391,9 +1103,6 @@ const plugin: Plugin = async (ctx) => {
       );
 
       // Mark all injected messages as "presented" to prevent double-delivery via resume
-      // "Presented" means the agent saw the message in their context
-      // This is different from "handled" which means the agent explicitly used reply_to
-      // We don't resume with presented messages (agent had a chance to see them)
       if (unhandled.length > 0) {
         markMessagesAsPresented(
           sessionId,
