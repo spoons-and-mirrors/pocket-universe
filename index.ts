@@ -1334,6 +1334,30 @@ const plugin: Plugin = async (ctx) => {
   storedClient = client;
 
   return {
+    // Allow main session to wait for spawned grandchild sessions
+    "session.before_complete": async (
+      input: { sessionID: string; parentSessionID?: string },
+      output: { waitForSessions: string[] },
+    ) => {
+      // Check if this session has pending spawns (grandchildren of parent)
+      const pendingSpawns = callerPendingSpawns.get(input.sessionID);
+      if (pendingSpawns && pendingSpawns.size > 0) {
+        log.info(
+          LOG.SESSION,
+          `session.before_complete: adding spawns to wait list`,
+          {
+            sessionID: input.sessionID,
+            parentSessionID: input.parentSessionID,
+            pendingSpawnCount: pendingSpawns.size,
+            pendingSpawnIds: Array.from(pendingSpawns),
+          },
+        );
+        for (const spawnId of pendingSpawns) {
+          output.waitForSessions.push(spawnId);
+        }
+      }
+    },
+
     // Track session idle events for broadcast resumption AND spawn completion
     "session.idle": async ({ sessionID }: { sessionID: string }) => {
       // Check if this is a registered IAM session (child session)
