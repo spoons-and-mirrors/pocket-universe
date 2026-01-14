@@ -203,6 +203,13 @@ const childSessionCache = new Set<string>();
 // Store pending task descriptions by parent session ID
 // parentSessionId -> array of descriptions (most recent last)
 const pendingTaskDescriptions = new Map<string, string[]>();
+
+// Track messages that were presented to an agent via transform injection
+// These are different from "handled" messages (which are explicitly replied to via reply_to)
+// Presented messages: agent saw them in context, may or may not have responded
+// Handled messages: agent explicitly used reply_to to respond
+// Key: sessionId, Value: Set of msgIndex that were presented
+const presentedMessages = new Map<string, Set<number>>();
 // Track spawned sessions that need to be injected into parent's message history
 // Maps parentSessionId -> array of spawn info
 interface SpawnInfo {
@@ -221,6 +228,23 @@ const pendingSpawns = new Map<string, SpawnInfo[]>();
 
 // Track active spawns by sessionId for completion updates
 const activeSpawns = new Map<string, SpawnInfo>();
+
+// ============================================================================
+// Session State Tracking (for broadcast resumption)
+// ============================================================================
+
+interface SessionState {
+  sessionId: string;
+  alias: string;
+  status: "active" | "idle";
+  lastActivity: number;
+}
+
+// Track session states for resumption
+const sessionStates = new Map<string, SessionState>();
+
+// Store the client reference for resumption calls
+let storedClient: OpenCodeSessionClient | null = null;
 
 // ============================================================================
 // Cleanup - prevent memory leaks
@@ -390,8 +414,136 @@ function sendMessage(from: string, to: string, body: string): Message {
   return message;
 }
 
+/**
+ * Resume an idle session by sending a broadcast message as a user prompt.
+ * This "wakes up" the idle agent to process the message.
+ */
+async function resumeSessionWithBroadcast(
+  recipientSessionId: string,
+  senderAlias: string,
+  messageContent: string,
+): Promise<boolean> {
+  if (!storedClient) {
+    log.warn(LOG.MESSAGE, `Cannot resume session - no client available`);
+    return false;
+  }
+
+  const recipientAlias = sessionToAlias.get(recipientSessionId) || "unknown";
+
+  log.info(LOG.MESSAGE, `Resuming idle session with broadcast`, {
+    recipientSessionId,
+    recipientAlias,
+    senderAlias,
+    messageLength: messageContent.length,
+  });
+
+  try {
+    // Format the message as a broadcast notification
+    const resumePrompt = `[Broadcast from ${senderAlias}]: ${messageContent}`;
+
+    // Mark session as active before resuming
+    const state = sessionStates.get(recipientSessionId);
+    if (state) {
+      state.status = "active";
+      state.lastActivity = Date.now();
+    }
+
+    log.info(LOG.MESSAGE, `Session resumed successfully`, {
+      recipientSessionId,
+      recipientAlias,
+    });
+
+    // Fire off the resume in the background but track its completion
+    // We use prompt() (not promptAsync) and await it so we know when it finishes
+    // This is wrapped in an IIFE so we don't block the caller
+    (async () => {
+      try {
+        await storedClient!.session.prompt({
+          path: { id: recipientSessionId },
+          body: {
+            parts: [{ type: "text", text: resumePrompt }],
+          },
+        });
+
+        // Mark session as idle after prompt completes
+        const stateAfter = sessionStates.get(recipientSessionId);
+        if (stateAfter) {
+          stateAfter.status = "idle";
+          stateAfter.lastActivity = Date.now();
+        }
+
+        log.info(LOG.MESSAGE, `Resumed session completed, marked idle`, {
+          recipientSessionId,
+          recipientAlias,
+        });
+
+        // Check for messages that need resumption (unhandled AND not presented)
+        const unreadMessages = getMessagesNeedingResume(recipientSessionId);
+        if (unreadMessages.length > 0) {
+          log.info(
+            LOG.MESSAGE,
+            `Resumed session has new unread messages, resuming again`,
+            {
+              recipientSessionId,
+              recipientAlias,
+              unreadCount: unreadMessages.length,
+            },
+          );
+
+          // Resume with the first unread message
+          const firstUnread = unreadMessages[0];
+          const senderAlias = firstUnread.from;
+
+          // Mark this message as presented BEFORE resuming to avoid infinite loop
+          markMessagesAsPresented(recipientSessionId, [firstUnread.msgIndex]);
+
+          await resumeSessionWithBroadcast(
+            recipientSessionId,
+            senderAlias,
+            firstUnread.body,
+          );
+        }
+      } catch (e) {
+        log.error(LOG.MESSAGE, `Resumed session failed`, {
+          recipientSessionId,
+          error: String(e),
+        });
+        // Mark as idle on error too
+        const stateErr = sessionStates.get(recipientSessionId);
+        if (stateErr) {
+          stateErr.status = "idle";
+        }
+      }
+    })();
+
+    return true;
+  } catch (e) {
+    log.error(LOG.MESSAGE, `Failed to resume session`, {
+      recipientSessionId,
+      error: String(e),
+    });
+    return false;
+  }
+}
+
 function getUnhandledMessages(sessionId: string): Message[] {
   return getInbox(sessionId).filter((m) => !m.handled);
+}
+
+/**
+ * Get messages that need resumption: unhandled AND not presented via transform.
+ * - Unhandled: agent didn't use reply_to to respond
+ * - Not presented: agent didn't see the message in their context (via transform injection)
+ * Only these messages should trigger a resume - they're truly "unseen" by the agent.
+ */
+function getMessagesNeedingResume(sessionId: string): Message[] {
+  const unhandled = getUnhandledMessages(sessionId);
+  const presented = presentedMessages.get(sessionId);
+  if (!presented || presented.size === 0) {
+    return unhandled; // No messages were presented, all unhandled need resume
+  }
+  // Filter out messages that were already presented to the agent
+  return unhandled.filter((m) => !presented.has(m.msgIndex));
 }
 
 function markMessagesAsHandled(
@@ -416,6 +568,21 @@ function markMessagesAsHandled(
     }
   }
   return handled;
+}
+
+function markMessagesAsPresented(sessionId: string, msgIndices: number[]) {
+  let presented = presentedMessages.get(sessionId);
+  if (!presented) {
+    presented = new Set();
+    presentedMessages.set(sessionId, presented);
+  }
+  for (const idx of msgIndices) {
+    presented.add(idx);
+  }
+  log.debug(LOG.MESSAGE, `Marked messages as presented (seen by agent)`, {
+    sessionId,
+    indices: msgIndices,
+  });
 }
 
 function getKnownAliases(sessionId: string): string[] {
@@ -1156,7 +1323,96 @@ const plugin: Plugin = async (ctx) => {
   const client = ctx.client as unknown as OpenCodeSessionClient;
   const serverUrl = ctx.serverUrl; // Server URL for raw fetch calls
 
+  // Store client for resumption calls
+  storedClient = client;
+
   return {
+    // Track session idle events for broadcast resumption
+    "session.idle": ({ sessionID }: { sessionID: string }) => {
+      log.debug(LOG.SESSION, `session.idle hook fired`, { sessionID });
+      const alias = sessionToAlias.get(sessionID);
+      if (alias) {
+        sessionStates.set(sessionID, {
+          sessionId: sessionID,
+          alias,
+          status: "idle",
+          lastActivity: Date.now(),
+        });
+        log.info(LOG.SESSION, `Session marked idle`, { sessionID, alias });
+      } else {
+        log.debug(LOG.SESSION, `session.idle for untracked session`, {
+          sessionID,
+        });
+      }
+    },
+
+    // Track when task tools complete - mark subtask sessions as idle
+    "tool.execute.after": async (
+      input: ToolExecuteInput,
+      output: ToolExecuteOutput,
+    ) => {
+      // Only care about task tool completions
+      if (input.tool !== "task") return;
+
+      // Get the subtask session ID from metadata
+      const subtaskSessionId =
+        output?.metadata?.sessionId || output?.metadata?.session_id;
+
+      if (subtaskSessionId) {
+        const alias = sessionToAlias.get(subtaskSessionId);
+        if (alias) {
+          sessionStates.set(subtaskSessionId, {
+            sessionId: subtaskSessionId,
+            alias,
+            status: "idle",
+            lastActivity: Date.now(),
+          });
+          log.info(LOG.SESSION, `Task completed, session marked idle`, {
+            subtaskSessionId,
+            alias,
+          });
+
+          // Check if there are unread messages for this session
+          // If so, resume the session so it can process them
+          // This handles the race condition where a message arrives
+          // after the session's last transform but before it completes
+          const unreadMessages = getMessagesNeedingResume(subtaskSessionId);
+          if (unreadMessages.length > 0) {
+            log.info(
+              LOG.SESSION,
+              `Session has unread messages on idle, resuming`,
+              {
+                subtaskSessionId,
+                alias,
+                unreadCount: unreadMessages.length,
+              },
+            );
+
+            // Resume with the first unread message
+            const firstUnread = unreadMessages[0];
+            const senderAlias = firstUnread.from;
+
+            // Mark this message as presented BEFORE resuming to avoid infinite loop
+            markMessagesAsPresented(subtaskSessionId, [firstUnread.msgIndex]);
+
+            resumeSessionWithBroadcast(
+              subtaskSessionId,
+              senderAlias,
+              firstUnread.body,
+            ).catch((e) =>
+              log.error(LOG.SESSION, `Failed to resume with unread message`, {
+                error: String(e),
+              }),
+            );
+          }
+        } else {
+          log.debug(LOG.SESSION, `Task completed for untracked session`, {
+            subtaskSessionId,
+          });
+        }
+      }
+    },
+
     tool: {
       broadcast: tool({
         description: BROADCAST_DESCRIPTION,
@@ -1230,6 +1486,35 @@ const plugin: Plugin = async (ctx) => {
               status: messageContent.substring(0, 80),
               discoveredAgents: knownAgents,
             });
+
+            // Check if any discovered agents are idle and resume them
+            // so they can see this new agent's announcement
+            for (const knownAlias of knownAgents) {
+              const knownSessionId = aliasToSession.get(knownAlias);
+              if (knownSessionId) {
+                const knownState = sessionStates.get(knownSessionId);
+                if (knownState?.status === "idle") {
+                  log.info(
+                    LOG.TOOL,
+                    `Resuming idle agent on status announcement`,
+                    {
+                      announcer: alias,
+                      idleAgent: knownAlias,
+                    },
+                  );
+                  resumeSessionWithBroadcast(
+                    knownSessionId,
+                    alias,
+                    messageContent, // Just the message, no "[New agent joined]" prefix
+                  ).catch((e) =>
+                    log.error(LOG.TOOL, `Failed to resume on announcement`, {
+                      error: String(e),
+                    }),
+                  );
+                }
+              }
+            }
+
             return broadcastResult(
               alias,
               knownAgents,
@@ -1344,8 +1629,49 @@ const plugin: Plugin = async (ctx) => {
             parentId && recipientSessions.includes(parentId);
 
           // Send messages to all recipients
-          for (const recipientSessionId of recipientSessions) {
+          // Check if recipient is idle and resume if so
+          const resumedSessions: string[] = [];
+
+          // Debug: log current session states
+          log.debug(LOG.TOOL, `Broadcast checking session states`, {
+            alias,
+            recipientCount: recipientSessions.length,
+            sessionStatesSize: sessionStates.size,
+            trackedSessions: Array.from(sessionStates.keys()),
+          });
+
+          for (let i = 0; i < recipientSessions.length; i++) {
+            const recipientSessionId = recipientSessions[i];
+            const recipientState = sessionStates.get(recipientSessionId);
+
+            log.debug(LOG.TOOL, `Checking recipient state`, {
+              recipientSessionId,
+              recipientAlias: validTargets[i],
+              hasState: !!recipientState,
+              status: recipientState?.status,
+            });
+
+            // Always store the message in inbox first
             sendMessage(alias, recipientSessionId, messageContent);
+
+            // If recipient is idle, also resume the session
+            if (recipientState?.status === "idle") {
+              const resumed = await resumeSessionWithBroadcast(
+                recipientSessionId,
+                alias,
+                messageContent,
+              );
+              if (resumed) {
+                resumedSessions.push(validTargets[i]);
+              }
+            }
+          }
+
+          if (resumedSessions.length > 0) {
+            log.info(LOG.TOOL, `Resumed idle sessions via broadcast`, {
+              alias,
+              resumedSessions,
+            });
           }
 
           // Notify parent session if targeted (DORMANT)
@@ -1753,6 +2079,21 @@ const plugin: Plugin = async (ctx) => {
         parallelAgents,
         hasAnnounced,
       );
+
+      // Mark all injected messages as "presented" to prevent double-delivery via resume
+      // "Presented" means the agent saw the message in their context
+      // This is different from "handled" which means the agent explicitly used reply_to
+      // We don't resume with presented messages (agent had a chance to see them)
+      if (unhandled.length > 0) {
+        markMessagesAsPresented(
+          sessionId,
+          unhandled.map((m) => m.msgIndex),
+        );
+        log.debug(LOG.INJECT, `Marked injected messages as presented`, {
+          sessionId,
+          messageCount: unhandled.length,
+        });
+      }
 
       // Push at the END of the messages array (recency bias)
       output.messages.push(inboxMsg as unknown as UserMessage);
