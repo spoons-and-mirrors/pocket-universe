@@ -30,6 +30,11 @@ export interface PocketUniverseConfig {
    * as a persisted user message, forcing immediate LLM attention.
    */
   subagent_result_forced_attention: boolean;
+  /**
+   * When true, recall tool can access agents from prior pocket universes.
+   * When false (default), recall only shows agents from the current pocket universe.
+   */
+  recall_cross_pocket: boolean;
 }
 
 // ============================================================================
@@ -43,6 +48,7 @@ const DEFAULT_CONFIG: PocketUniverseConfig = {
   logging: false,
   max_subagent_depth: 3,
   subagent_result_forced_attention: true,
+  recall_cross_pocket: false,
 };
 
 // ============================================================================
@@ -166,6 +172,7 @@ function loadConfig(): PocketUniverseConfig {
         max_subagent_depth: loadedConfig.max_subagent_depth,
         subagent_result_forced_attention:
           loadedConfig.subagent_result_forced_attention,
+        recall_cross_pocket: loadedConfig.recall_cross_pocket,
       });
     });
   }
@@ -228,6 +235,13 @@ export function isSubagentResultForcedAttention(): boolean {
 }
 
 /**
+ * Check if recall can access agents from prior pocket universes
+ */
+export function isRecallCrossPocket(): boolean {
+  return loadConfig().recall_cross_pocket;
+}
+
+/**
  * Get the config file path that was used (or would be used)
  */
 export function getConfigPath(): string | null {
@@ -264,7 +278,11 @@ export function getConfigTemplate(): string {
 
   // When true (default), subagent results appear in broadcast inbox.
   // When false, subagent results are injected as persisted user message.
-  "subagent_result_forced_attention": true
+  "subagent_result_forced_attention": true,
+
+  // When true, recall can access agents from prior pocket universes.
+  // When false (default), recall only shows current pocket universe agents.
+  "recall_cross_pocket": false
 }
 `;
 }

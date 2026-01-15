@@ -15,6 +15,7 @@ import {
   RECALL_AGENT_ACTIVE,
   RECALL_AGENT_IDLE_NO_OUTPUT,
 } from "./prompts/recall.prompts";
+import { isRecallCrossPocket } from "./config";
 
 // ============================================================================
 // Constants
@@ -44,11 +45,25 @@ export interface CompletedAgentRecord {
   finalOutput: string;
   state: "completed";
   completedAt: number;
+  /** Main session ID that this agent belonged to (pocket universe identifier) */
+  pocketId?: string;
 }
 
 // History of completed agents - survives cleanup within same opencode session
-// This allows agents in new pocket universes to recall what previous agents did
+// When recall_cross_pocket is false, filtering happens in recallAgents()
 export const completedAgentHistory: CompletedAgentRecord[] = [];
+
+// Track current pocket universe's main session ID
+let currentPocketId: string | null = null;
+
+export function setCurrentPocketId(mainSessionId: string): void {
+  currentPocketId = mainSessionId;
+  log.debug(LOG.SESSION, `Current pocket ID set`, { pocketId: mainSessionId });
+}
+
+export function getCurrentPocketId(): string | null {
+  return currentPocketId;
+}
 
 // Store final outputs for agents as they complete (used before saving to history)
 export const agentFinalOutputs = new Map<string, string>(); // alias -> output
@@ -59,6 +74,7 @@ export const agentFinalOutputs = new Map<string, string>(); // alias -> output
  */
 export function saveAgentToHistory(alias: string, finalOutput: string): void {
   const statusHistory = agentDescriptions.get(alias) || [];
+  const pocketId = getCurrentPocketId();
 
   // Check if already in history (avoid duplicates)
   const existing = completedAgentHistory.find((r) => r.alias === alias);
@@ -67,6 +83,7 @@ export function saveAgentToHistory(alias: string, finalOutput: string): void {
     existing.statusHistory = [...statusHistory];
     existing.finalOutput = finalOutput;
     existing.completedAt = Date.now();
+    existing.pocketId = pocketId || undefined;
     return;
   }
 
@@ -76,6 +93,7 @@ export function saveAgentToHistory(alias: string, finalOutput: string): void {
     finalOutput,
     state: "completed",
     completedAt: Date.now(),
+    pocketId: pocketId || undefined,
   };
 
   completedAgentHistory.push(record);
@@ -84,12 +102,14 @@ export function saveAgentToHistory(alias: string, finalOutput: string): void {
     statusCount: statusHistory.length,
     outputLength: finalOutput.length,
     totalHistory: completedAgentHistory.length,
+    pocketId,
   });
 }
 
 /**
  * Get agent info for recall tool - queries both active agents and history.
  * Output is only included when showOutput=true AND agentName is specified.
+ * When recall_cross_pocket is false, only shows agents from current pocket universe.
  */
 export function recallAgents(
   agentName?: string,
@@ -112,9 +132,15 @@ export function recallAgents(
   // Only include output if BOTH agent_name is specified AND show_output is true
   const includeOutput = Boolean(agentName && showOutput);
 
+  // Check if cross-pocket recall is enabled
+  const crossPocket = isRecallCrossPocket();
+  const pocketId = getCurrentPocketId();
+
   // First, add historical (completed) agents
   for (const record of completedAgentHistory) {
     if (agentName && record.alias !== agentName) continue;
+    // Filter by pocket if cross-pocket is disabled
+    if (!crossPocket && pocketId && record.pocketId !== pocketId) continue;
     const entry: {
       name: string;
       status_history: string[];
@@ -528,6 +554,9 @@ export function cleanupCompletedAgents(): void {
   pendingSubagentOutputs.clear();
   // Note: We do NOT clear cleanedUpSessions here - it tracks sessions across cleanups
   pendingTaskDescriptions.clear();
+
+  // Reset current pocket ID - next pocket universe gets a new one
+  currentPocketId = null;
 
   // Note: We do NOT clear summaryInjectedSessions here
   // because that's used to track which main sessions got summaries

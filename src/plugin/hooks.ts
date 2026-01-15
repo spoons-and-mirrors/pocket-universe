@@ -27,6 +27,8 @@ import {
   registerSession,
   getWorktree,
   setWorktree,
+  setCurrentPocketId,
+  getCurrentPocketId,
 } from "../state";
 import {
   resumeSessionWithBroadcast,
@@ -509,7 +511,19 @@ export function createHooks(client: OpenCodeSessionClient) {
         // Check if this is a first-level child (parent is main session)
         const grandparentId = await getParentId(client, parentId);
         if (!grandparentId) {
-          // Parent is main session - track this child (unless already completed)
+          // Parent is main session - this is a first-level child
+          // Set the pocket ID if not already set (first child in this pocket)
+          // Use the CHILD session ID as the pocket ID (unique per pocket universe)
+          if (!getCurrentPocketId()) {
+            setCurrentPocketId(sessionId);
+            log.info(LOG.HOOK, `Pocket universe started`, {
+              mainSessionId: parentId,
+              pocketId: sessionId,
+              firstChildAlias: getAlias(sessionId),
+            });
+          }
+
+          // Track this child (unless already completed)
           const completed = completedFirstLevelChildren.get(parentId);
           if (completed?.has(sessionId)) {
             log.debug(
