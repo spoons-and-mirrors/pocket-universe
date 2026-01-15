@@ -640,6 +640,43 @@ Do NOT modify files outside this worktree.
 
       const sessionId = lastUserMsg.info.sessionID;
 
+      // Check for pending subagent outputs (user message mode - config false)
+      // These need to be injected immediately, not at session.before_complete
+      const pendingOutput = pendingSubagentOutputs.get(sessionId);
+      if (pendingOutput) {
+        // Remove from map before injecting to prevent double-injection
+        pendingSubagentOutputs.delete(sessionId);
+
+        log.info(
+          LOG.INJECT,
+          `Injecting pending subagent output as user message`,
+          {
+            sessionId,
+            senderAlias: pendingOutput.senderAlias,
+            outputLength: pendingOutput.output.length,
+          },
+        );
+
+        // Create a synthetic user message with the subagent output
+        const userMsg = {
+          info: {
+            id: `msg_sub_out_${Date.now()}`,
+            sessionID: sessionId,
+            role: "user" as const,
+            createdAt: new Date().toISOString(),
+            synthetic: true,
+          },
+          parts: [{ type: "text" as const, text: pendingOutput.output }],
+        };
+
+        output.messages.push(userMsg as unknown as UserMessage);
+
+        log.info(LOG.INJECT, `Injected subagent output as user message`, {
+          sessionId,
+          senderAlias: pendingOutput.senderAlias,
+        });
+      }
+
       // Check for pending subagents that need to be injected into this session
       const subagents = pendingSubagents.get(sessionId) || [];
       const uninjectedSubagents = subagents.filter((s) => !s.injected);

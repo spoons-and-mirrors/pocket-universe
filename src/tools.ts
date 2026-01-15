@@ -607,14 +607,54 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             // Create a summary message with the subagent output
             const outputMessage = `[Received ${newAlias} completed task]\n${subagentOutput}`;
 
-            // Check if forced attention mode is enabled (flag false = forced attention)
-            const useForcedAttention = !isSubagentResultForcedAttention();
+            // Check config: true = inbox mode (forced attention), false = user message mode
+            const useInboxMode = isSubagentResultForcedAttention();
 
-            if (useForcedAttention) {
-              // Forced attention: inject subagent output as persisted user message
+            if (useInboxMode) {
+              // Inbox mode: output appears in synthetic broadcast injection
+              if (callerState?.status === "idle") {
+                // Caller is idle - resume with the output via broadcast
+                log.info(
+                  LOG.TOOL,
+                  `Piping subagent output to idle caller via broadcast resume`,
+                  {
+                    callerSessionId: sessionId,
+                    callerAlias: callerAliasForPipe,
+                    subagentAlias: newAlias,
+                  },
+                );
+                resumeSessionWithBroadcast(
+                  sessionId,
+                  newAlias,
+                  outputMessage,
+                ).catch((e) =>
+                  log.error(
+                    LOG.TOOL,
+                    `Failed to pipe subagent output to caller`,
+                    {
+                      error: String(e),
+                    },
+                  ),
+                );
+              } else {
+                // Caller is still active - add to inbox for next synthetic injection
+                log.info(
+                  LOG.TOOL,
+                  `Piping subagent output to active caller via inbox`,
+                  {
+                    callerSessionId: sessionId,
+                    callerAlias: callerAliasForPipe,
+                    subagentAlias: newAlias,
+                  },
+                );
+                sendMessage(newAlias, sessionId, outputMessage);
+              }
+            } else {
+              // User message mode: output injected as resumePrompt via session.before_complete
+              // NOTE: This currently waits until caller finishes current work - see TODO
               log.info(
                 LOG.TOOL,
-                `Piping subagent output via forced attention (persisted user message)`,
+                `Storing subagent output for user message injection`,
                 {
                   callerSessionId: sessionId,
                   callerAlias: callerAliasForPipe,
@@ -628,48 +668,12 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
               ).catch((e) =>
                 log.error(
                   LOG.TOOL,
-                  `Failed to pipe subagent output (forced attention)`,
+                  `Failed to store subagent output for user message`,
                   {
                     error: String(e),
                   },
                 ),
               );
-            } else if (callerState?.status === "idle") {
-              // Caller is idle - resume with the output via message queue
-              log.info(
-                LOG.TOOL,
-                `Piping subagent output to idle caller via resume`,
-                {
-                  callerSessionId: sessionId,
-                  callerAlias: callerAliasForPipe,
-                  subagentAlias: newAlias,
-                },
-              );
-              resumeSessionWithBroadcast(
-                sessionId,
-                newAlias,
-                outputMessage,
-              ).catch((e) =>
-                log.error(
-                  LOG.TOOL,
-                  `Failed to pipe subagent output to caller`,
-                  {
-                    error: String(e),
-                  },
-                ),
-              );
-            } else {
-              // Caller is still active - send as broadcast message
-              log.info(
-                LOG.TOOL,
-                `Piping subagent output to active caller via message`,
-                {
-                  callerSessionId: sessionId,
-                  callerAlias: callerAliasForPipe,
-                  subagentAlias: newAlias,
-                },
-              );
-              sendMessage(newAlias, sessionId, outputMessage);
             }
 
             // 5. Check for unread messages and resume subagent session if needed
