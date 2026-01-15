@@ -649,7 +649,7 @@ Do NOT modify files outside this worktree.
 
         log.info(
           LOG.INJECT,
-          `Injecting pending subagent output as user message`,
+          `Injecting pending subagent output into last user message`,
           {
             sessionId,
             senderAlias: pendingOutput.senderAlias,
@@ -657,24 +657,26 @@ Do NOT modify files outside this worktree.
           },
         );
 
-        // Create a synthetic user message with the subagent output
-        const userMsg = {
-          info: {
-            id: `msg_sub_out_${Date.now()}`,
-            sessionID: sessionId,
-            role: "user" as const,
-            createdAt: new Date().toISOString(),
-            synthetic: true,
-          },
-          parts: [{ type: "text" as const, text: pendingOutput.output }],
+        const now = Date.now();
+        const pendingPart = {
+          id: `prt_sub_out_${now}`,
+          sessionID: sessionId,
+          messageID: lastUserMsg.info.id,
+          type: "text" as const,
+          text: pendingOutput.output,
+          synthetic: true,
         };
 
-        output.messages.push(userMsg as unknown as UserMessage);
+        lastUserMsg.parts.push(pendingPart);
 
-        log.info(LOG.INJECT, `Injected subagent output as user message`, {
-          sessionId,
-          senderAlias: pendingOutput.senderAlias,
-        });
+        log.info(
+          LOG.INJECT,
+          `Injected subagent output into last user message`,
+          {
+            sessionId,
+            senderAlias: pendingOutput.senderAlias,
+          },
+        );
       }
 
       // Check for pending subagents that need to be injected into this session

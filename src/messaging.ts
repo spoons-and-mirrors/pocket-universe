@@ -200,6 +200,52 @@ export async function resumeWithSubagentOutput(
 ): Promise<boolean> {
   const recipientAlias = sessionToAlias.get(recipientSessionId) || "unknown";
 
+  // Format the output message
+  const formattedOutput = `[Subagent ${senderAlias} completed]
+
+<agent_output from="${senderAlias}">
+${subagentOutput}
+</agent_output>`;
+
+  const storedClient = getStoredClient();
+  if (storedClient) {
+    try {
+      await storedClient.session.prompt({
+        path: { id: recipientSessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: "text", text: formattedOutput }],
+        } as unknown as {
+          parts: Array<{ type: string; text: string }>;
+          noReply: boolean;
+        },
+      });
+
+      log.info(
+        LOG.MESSAGE,
+        `Injected subagent output as persisted user message`,
+        {
+          recipientSessionId,
+          recipientAlias,
+          senderAlias,
+        },
+      );
+
+      return true;
+    } catch (e) {
+      log.warn(
+        LOG.MESSAGE,
+        `Failed to persist subagent output, falling back to pending injection`,
+        {
+          recipientSessionId,
+          recipientAlias,
+          senderAlias,
+          error: String(e),
+        },
+      );
+    }
+  }
+
   log.info(
     LOG.MESSAGE,
     `Storing subagent output for resume (no forced attention)`,
@@ -210,13 +256,6 @@ export async function resumeWithSubagentOutput(
       outputLength: subagentOutput.length,
     },
   );
-
-  // Format the output message
-  const formattedOutput = `[Subagent ${senderAlias} completed]
-
-<agent_output from="${senderAlias}">
-${subagentOutput}
-</agent_output>`;
 
   // Store for session.before_complete to pick up
   pendingSubagentOutputs.set(recipientSessionId, {
