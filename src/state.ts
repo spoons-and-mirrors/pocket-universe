@@ -19,6 +19,7 @@ import { log, LOG } from "./logger";
 export const CHAR_CODE_A = 65; // ASCII code for 'A'
 export const ALPHABET_SIZE = 26;
 export const MAX_DESCRIPTION_LENGTH = 300;
+export const MAX_STATUS_HISTORY = 10; // Keep last N status updates per agent
 export const MESSAGE_TTL_MS = 30 * 60 * 1000; // 30 minutes for handled messages
 export const UNHANDLED_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours for unhandled messages
 export const MAX_INBOX_SIZE = 100; // Max messages per inbox
@@ -48,7 +49,7 @@ export const announcedSessions = new Set<string>();
 // Alias mappings: sessionId <-> alias (e.g., "agentA", "agentB")
 export const sessionToAlias = new Map<string, string>();
 export const aliasToSession = new Map<string, string>();
-export const agentDescriptions = new Map<string, string>(); // alias -> description
+export const agentDescriptions = new Map<string, string[]>(); // alias -> status history (most recent last)
 
 // Atomic alias counter with registration lock
 let nextAgentIndex = 0;
@@ -204,12 +205,38 @@ export function getAlias(sessionId: string): string {
 export function setDescription(sessionId: string, description: string): void {
   const alias = getAlias(sessionId);
   const truncated = description.substring(0, MAX_DESCRIPTION_LENGTH);
-  agentDescriptions.set(alias, truncated);
-  log.info(LOG.SESSION, `Agent announced`, { alias, description: truncated });
+
+  // Get or create status history array
+  let history = agentDescriptions.get(alias);
+  if (!history) {
+    history = [];
+    agentDescriptions.set(alias, history);
+  }
+
+  // Add new status to history
+  history.push(truncated);
+
+  // Trim to max history size
+  if (history.length > MAX_STATUS_HISTORY) {
+    history.shift(); // Remove oldest
+  }
+
+  log.info(LOG.SESSION, `Agent status updated`, {
+    alias,
+    status: truncated,
+    historyLength: history.length,
+  });
 }
 
-export function getDescription(alias: string): string | undefined {
+export function getDescription(alias: string): string[] | undefined {
   return agentDescriptions.get(alias);
+}
+
+export function getLatestStatus(alias: string): string | undefined {
+  const history = agentDescriptions.get(alias);
+  return history && history.length > 0
+    ? history[history.length - 1]
+    : undefined;
 }
 
 export function resolveAlias(

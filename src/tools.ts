@@ -114,7 +114,7 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         // Mark this session as having announced
         announcedSessions.add(sessionId);
 
-        setDescription(sessionId, messageContent);
+        // Note: setDescription is called below for ALL broadcast-to-all calls, not just first
 
         const knownAgents = getKnownAliases(sessionId);
 
@@ -196,8 +196,19 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         // reply_to takes precedence - ALWAYS auto-wire to the sender, ignore send_to param
         targetAliases = [autoRecipient];
       } else if (!args.send_to) {
-        // No target specified - send to all known agents
-        targetAliases = knownAgents;
+        // No target specified - broadcast to all = STATUS UPDATE ONLY
+        // Update this agent's status and return early (no messages queued)
+        // NOTE: Does NOT resume idle agents - status updates are passive visibility
+        setDescription(sessionId, messageContent);
+
+        log.info(LOG.TOOL, `Broadcast to all - status update only`, {
+          alias,
+          status: messageContent.substring(0, 80),
+          knownAgents,
+        });
+
+        // Return early - no messages added to queue, no agents resumed
+        return broadcastResult(alias, knownAgents, parallelAgents, undefined);
       } else {
         // Explicit recipient specified - single target only
         targetAliases = [args.send_to.trim()];

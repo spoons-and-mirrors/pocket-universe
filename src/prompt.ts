@@ -12,7 +12,7 @@ export const SPAWN_DESCRIPTION = `Spawn a new sibling agent to work on a task in
 
 export interface ParallelAgent {
   alias: string;
-  description?: string;
+  description?: string[]; // Status history (most recent last)
   worktree?: string; // Isolated working directory path
 }
 
@@ -43,13 +43,17 @@ export function broadcastResult(
     lines.push(`Available agents:`);
     for (const agent of parallelAgents) {
       let agentLine = `  - ${agent.alias}`;
-      if (agent.description) {
-        agentLine += `: ${agent.description}`;
-      }
       if (agent.worktree) {
         agentLine += ` [worktree: ${agent.worktree}]`;
       }
       lines.push(agentLine);
+
+      // Show status history (most recent last)
+      if (agent.description && agent.description.length > 0) {
+        for (const status of agent.description) {
+          lines.push(`      → ${status}`);
+        }
+      }
     }
   } else {
     lines.push(`No other agents available yet.`);
@@ -129,7 +133,9 @@ Use \`broadcast\` to communicate with other parallel agents.`);
   // Announce section
   sections.push(`
 ## IMPORTANT: Announce Yourself First
-Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.`);
+Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.
+
+**Status updates**: Calling \`broadcast(message="...")\` without \`send_to\` updates your status. This is passive visibility — other agents see your status history when they broadcast. Use status updates to track progress (e.g., "searching for X", "found X", "implementing Y"). Status updates do NOT send messages or wake other agents.`);
 
   // Worktree section (only if enabled)
   if (isWorktreeEnabled()) {
@@ -145,9 +151,11 @@ Each agent operates in its own isolated git worktree - a clean checkout from the
   // Messaging section
   sections.push(`
 ## Sending Messages
-- \`broadcast(message="...")\` → announce yourself or send to all agents
-- \`broadcast(send_to="agentB", message="...")\` → send to specific agent
-- \`broadcast(reply_to=1, message="...")\` → reply to message #1`);
+- \`broadcast(message="...")\` → **status update** (visible to all, not a message)
+- \`broadcast(send_to="agentB", message="...")\` → send message to specific agent
+- \`broadcast(reply_to=1, message="...")\` → reply to message #1
+
+**Important:** Broadcasting without \`send_to\` updates your status but does NOT queue a message. Use \`send_to\` for direct communication that needs a reply.`);
 
   // Spawn section (only if enabled)
   if (isSpawnEnabled()) {

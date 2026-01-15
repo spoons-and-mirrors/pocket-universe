@@ -59,8 +59,8 @@ sequenceDiagram
 ### `broadcast` — Inter-agent messaging
 
 ```
-broadcast(message="...")                     # Send to all agents
-broadcast(send_to="agentB", message="...")   # Send to specific agent
+broadcast(message="...")                     # Status update (visible to all, not queued)
+broadcast(send_to="agentB", message="...")   # Direct message (queued, replyable)
 broadcast(reply_to=1, message="...")         # Reply to message #1
 ```
 
@@ -69,6 +69,13 @@ broadcast(reply_to=1, message="...")         # Reply to message #1
 | `message`  | Yes      | Your message content                          |
 | `send_to`  | No       | Target agent alias                            |
 | `reply_to` | No       | Message ID to reply to (auto-wires recipient) |
+
+**Status vs Messages:**
+
+- **Without `send_to`**: Updates your status history (other agents see it in the agent list). Passive visibility only — does NOT send messages or wake agents.
+- **With `send_to`**: Sends a direct message that appears in the recipient's inbox and is replyable.
+
+**Status history:** Each agent's status updates are tracked as a history. When you see an agent, you see all their status updates in order, showing what they've been doing.
 
 ### `spawn` — Create sibling agents
 

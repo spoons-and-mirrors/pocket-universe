@@ -96,11 +96,11 @@ export function createInboxMessage(
   const userInfo = baseUserMessage.info;
 
   // Build structured output - this is what the LLM sees as the "tool result"
-  // Agents section shows available agents and their status (not replyable)
+  // Agents section shows available agents and their status history (not replyable)
   // Messages section shows replyable messages
   const outputData: {
     hint?: string;
-    agents?: Array<{ name: string; status?: string; worktree?: string }>;
+    agents?: Array<{ name: string; status?: string[]; worktree?: string }>;
     messages?: Array<{ id: number; from: string; content: string }>;
   } = {};
 
@@ -114,7 +114,7 @@ export function createInboxMessage(
   if (parallelAgents.length > 0) {
     outputData.agents = parallelAgents.map((agent) => ({
       name: agent.alias,
-      status: agent.description,
+      status: agent.description, // Now an array of status updates
       worktree: agent.worktree,
     }));
   }
@@ -148,7 +148,9 @@ export function createInboxMessage(
   log.info(LOG.MESSAGE, `Creating inbox injection`, {
     sessionId,
     agents: parallelAgents.map((a) => a.alias),
-    agentStatuses: parallelAgents.map((a) => a.description?.substring(0, 50)),
+    agentStatuses: parallelAgents.map((a) =>
+      a.description?.slice(-2).join(", "),
+    ),
     messageIds: messages.map((m) => m.msgIndex),
     messageFroms: messages.map((m) => m.from),
   });
@@ -221,7 +223,7 @@ export function createWorktreeSummaryMessage(
   // Collect all active worktrees with their agent info
   const worktreeInfo: Array<{
     alias: string;
-    description: string | undefined;
+    description: string[] | undefined;
     worktree: string;
   }> = [];
 
@@ -230,7 +232,7 @@ export function createWorktreeSummaryMessage(
     if (alias && worktreePath) {
       worktreeInfo.push({
         alias,
-        description: agentDescriptions.get(alias),
+        description: agentDescriptions.get(alias), // Now an array
         worktree: worktreePath,
       });
     }
