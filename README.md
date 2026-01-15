@@ -10,6 +10,7 @@ Async agents are powerful but can lead to work getting orphaned and a bunch of y
 - **No wasted tokens** — Every model output is captured and delivered, guaranteed
 - **Automatic resumption** — Idle agents wake up when messages arrive
 - **Complete orchestration** — Main session waits for ALL work to finish before continuing
+- **Persistent history** — Agents can recall what previous agents accomplished via the `recall` tool
 - **Isolated worktrees** — Each agent works in its own git worktree, no conflicts
 
 Within a single main session call, an entire universe of parallel work can unfold — agents spawning agents, communicating, coordinating — and the main session observes it all complete before moving on. No orphaned work. No lost context. No wasted compute. No guarantee this actually helps anything, but it's worth trying.
@@ -95,6 +96,46 @@ subagent(prompt="Build the login form", description="Login UI")
 - **Main thread block**: The main session waits for ALL subagents to complete before continuing
 - **Model inheritance**: Subagents automatically inherit the caller's agent and model (no fallback to defaults)
 
+### `recall` — Query agent history
+
+```
+recall()                                        # Get all agents' status histories
+recall(agent_name="agentA")                     # Get specific agent's history
+recall(agent_name="agentA", show_output=true)   # Include agent's final output
+```
+
+| Parameter     | Required | Description                                                   |
+| ------------- | -------- | ------------------------------------------------------------- |
+| `agent_name`  | No       | Specific agent to recall (omit for all agents)                |
+| `show_output` | No       | Include final output (only works with `agent_name` specified) |
+
+**Key behavior:**
+
+- **Persists across cleanups**: History survives pocket universe cleanup, so agents in batch 2 can recall what batch 1 agents did
+- **Status history only by default**: Output is only shown when BOTH `agent_name` AND `show_output=true` are specified
+- **Active agent handling**: If you request output for an agent that's still active, you'll get `[Agent is still active - no output yet]`
+
+**Example response:**
+
+```json
+{
+  "agents": [
+    {
+      "name": "agentA",
+      "status_history": ["Working on login form", "Integrating API"],
+      "state": "completed",
+      "output": "Login form implemented with OAuth support..."
+    }
+  ]
+}
+```
+
+**Use cases:**
+
+- New agent needs to know what previous agents accomplished
+- Agent wants to check if another agent finished and see their results
+- Coordinating work based on what others have done
+
 </details>
 
 <details>
@@ -160,6 +201,7 @@ Messages appear as synthetic `broadcast` tool results:
   "state": {
     "input": { "synthetic": true },
     "output": {
+      "you_are": "agentB",
       "agents": [
         {
           "name": "agentA",
@@ -173,6 +215,7 @@ Messages appear as synthetic `broadcast` tool results:
 ```
 
 - **`synthetic: true`** — Injected by Pocket Universe, not a real tool call
+- **`you_are`** — Your agent name (always included so you know your identity)
 - **`agents`** — All sibling agents and their status history (array of status updates)
 - **`messages`** — Inbox messages, reply using `reply_to`
 

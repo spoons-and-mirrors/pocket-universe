@@ -31,6 +31,139 @@ export const MAX_MESSAGE_LENGTH = 10000; // Prevent excessively long messages
 export const WORKTREES_DIR = ".worktrees"; // Directory for agent worktrees
 
 // ============================================================================
+// Completed Agent History (persists across pocket universe cleanups)
+// ============================================================================
+
+export interface CompletedAgentRecord {
+  alias: string;
+  statusHistory: string[];
+  finalOutput: string;
+  state: "completed";
+  completedAt: number;
+}
+
+// History of completed agents - survives cleanup within same opencode session
+// This allows agents in new pocket universes to recall what previous agents did
+export const completedAgentHistory: CompletedAgentRecord[] = [];
+
+// Store final outputs for agents as they complete (used before saving to history)
+export const agentFinalOutputs = new Map<string, string>(); // alias -> output
+
+/**
+ * Save an agent's data to the completed history.
+ * Called when an agent completes its work.
+ */
+export function saveAgentToHistory(alias: string, finalOutput: string): void {
+  const statusHistory = agentDescriptions.get(alias) || [];
+
+  // Check if already in history (avoid duplicates)
+  const existing = completedAgentHistory.find((r) => r.alias === alias);
+  if (existing) {
+    log.debug(LOG.SESSION, `Agent already in history, updating`, { alias });
+    existing.statusHistory = [...statusHistory];
+    existing.finalOutput = finalOutput;
+    existing.completedAt = Date.now();
+    return;
+  }
+
+  const record: CompletedAgentRecord = {
+    alias,
+    statusHistory: [...statusHistory],
+    finalOutput,
+    state: "completed",
+    completedAt: Date.now(),
+  };
+
+  completedAgentHistory.push(record);
+  log.info(LOG.SESSION, `Saved agent to history`, {
+    alias,
+    statusCount: statusHistory.length,
+    outputLength: finalOutput.length,
+    totalHistory: completedAgentHistory.length,
+  });
+}
+
+/**
+ * Get agent info for recall tool - queries both active agents and history.
+ * Output is only included when showOutput=true AND agentName is specified.
+ */
+export function recallAgents(
+  agentName?: string,
+  showOutput?: boolean,
+): {
+  agents: Array<{
+    name: string;
+    status_history: string[];
+    state: "active" | "idle" | "completed";
+    output?: string;
+  }>;
+} {
+  const results: Array<{
+    name: string;
+    status_history: string[];
+    state: "active" | "idle" | "completed";
+    output?: string;
+  }> = [];
+
+  // Only include output if BOTH agent_name is specified AND show_output is true
+  const includeOutput = Boolean(agentName && showOutput);
+
+  // First, add historical (completed) agents
+  for (const record of completedAgentHistory) {
+    if (agentName && record.alias !== agentName) continue;
+    const entry: {
+      name: string;
+      status_history: string[];
+      state: "active" | "idle" | "completed";
+      output?: string;
+    } = {
+      name: record.alias,
+      status_history: record.statusHistory,
+      state: "completed",
+    };
+    if (includeOutput) {
+      entry.output = record.finalOutput;
+    }
+    results.push(entry);
+  }
+
+  // Then add active agents (not yet in history)
+  for (const [alias, sessionId] of aliasToSession) {
+    // Skip if already in history
+    if (completedAgentHistory.some((r) => r.alias === alias)) continue;
+    if (agentName && alias !== agentName) continue;
+
+    const statusHistory = agentDescriptions.get(alias) || [];
+    const sessionState = sessionStates.get(sessionId);
+    const state = sessionState?.status === "idle" ? "idle" : "active";
+
+    const entry: {
+      name: string;
+      status_history: string[];
+      state: "active" | "idle" | "completed";
+      output?: string;
+    } = {
+      name: alias,
+      status_history: statusHistory,
+      state,
+    };
+    if (includeOutput) {
+      const storedOutput = agentFinalOutputs.get(alias);
+      if (storedOutput) {
+        entry.output = storedOutput;
+      } else if (state === "active") {
+        entry.output = "[Agent is still active - no output yet]";
+      } else {
+        entry.output = "[Agent is idle but has not produced output yet]";
+      }
+    }
+    results.push(entry);
+  }
+
+  return { agents: results };
+}
+
+// ============================================================================
 // In-memory message store
 // ============================================================================
 

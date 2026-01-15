@@ -32,6 +32,8 @@ import {
   setWorktree,
   getWorktree,
   removeWorktree,
+  saveAgentToHistory,
+  recallAgents,
 } from "./state";
 import {
   sendMessage,
@@ -560,6 +562,9 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
               newAlias,
             );
 
+            // 1.5. Save to history for recall tool
+            saveAgentToHistory(newAlias, subagentOutput);
+
             // 2. Mark session as idle in sessionStates (enables resume)
             sessionStates.set(newSessionId, {
               sessionId: newSessionId,
@@ -708,6 +713,62 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
         });
         return `Error: Failed to create subagent: ${String(e)}`;
       }
+    },
+  });
+}
+
+// ============================================================================
+// Recall Tool
+// ============================================================================
+
+const RECALL_DESCRIPTION = `Recall the history and status of agents in this Pocket Universe.
+
+Use this to learn what previous agents accomplished, even if they completed before you started.
+
+- Call with no parameters to get all agents' status histories
+- Call with agent_name to get a specific agent's history
+- Call with agent_name AND show_output=true to also see their final output
+
+Output is only shown when requesting a specific agent with show_output=true.`;
+
+export function createRecallTool() {
+  return tool({
+    description: RECALL_DESCRIPTION,
+    args: {
+      agent_name: tool.schema
+        .string()
+        .optional()
+        .describe(
+          "Specific agent to recall (e.g., 'agentA'). Omit to get all agents.",
+        ),
+      show_output: tool.schema
+        .boolean()
+        .optional()
+        .describe(
+          "Include the agent's final output. Only works when agent_name is specified.",
+        ),
+    },
+    async execute(args, context: ToolContext) {
+      const sessionId = context.sessionID;
+      const alias = getAlias(sessionId);
+
+      log.info(LOG.TOOL, `recall called`, {
+        alias,
+        targetAgent: args.agent_name || "all",
+        showOutput: args.show_output || false,
+      });
+
+      const result = recallAgents(args.agent_name, args.show_output);
+
+      if (result.agents.length === 0) {
+        if (args.agent_name) {
+          return `No agent found with name '${args.agent_name}'.`;
+        }
+        return `No agents in history yet.`;
+      }
+
+      // Format nicely for LLM
+      return JSON.stringify(result, null, 2);
     },
   });
 }

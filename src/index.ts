@@ -48,7 +48,11 @@ import {
   injectPocketUniverseSummaryToMain,
   createSummaryCoverMessage,
 } from "./injection";
-import { createBroadcastTool, createSubagentTool } from "./tools";
+import {
+  createBroadcastTool,
+  createSubagentTool,
+  createRecallTool,
+} from "./tools";
 import { createAgentWorktree } from "./worktree";
 import { isSubagentEnabled, isWorktreeEnabled } from "./config";
 
@@ -408,6 +412,7 @@ const plugin: Plugin = async (ctx) => {
 
     tool: {
       broadcast: createBroadcastTool(client),
+      recall: createRecallTool(),
       // Only register subagent tool if enabled in config
       ...(isSubagentEnabled() ? { subagent: createSubagentTool(client) } : {}),
     },
@@ -727,7 +732,12 @@ Do NOT modify files outside this worktree.
       const existingSubagentTools = experimental.subagent_tools ?? [];
       output.experimental = {
         ...experimental,
-        subagent_tools: [...existingSubagentTools, "broadcast", "subagent"],
+        subagent_tools: [
+          ...existingSubagentTools,
+          "broadcast",
+          "recall",
+          "subagent",
+        ],
       };
       log.info(
         LOG.HOOK,
