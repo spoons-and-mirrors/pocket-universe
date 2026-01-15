@@ -16,6 +16,7 @@ import {
   getNextMsgIndex,
   getInbox,
   MAX_INBOX_SIZE,
+  getWorktree,
 } from "./state";
 
 // Re-export injection functions for backwards compatibility
@@ -24,6 +25,7 @@ export {
   isChildSession,
   createInboxMessage,
   createSpawnTaskMessage,
+  createWorktreeSummaryMessage,
   injectTaskPartToParent,
   fetchSpawnOutput,
   markSpawnCompleted,
@@ -259,13 +261,14 @@ export function getKnownAliases(sessionId: string): string[] {
 export function getParallelAgents(sessionId: string): ParallelAgent[] {
   const selfAlias = sessionToAlias.get(sessionId);
   const agents: ParallelAgent[] = [];
-  for (const [alias] of aliasToSession.entries()) {
+  for (const [alias, sessId] of aliasToSession.entries()) {
     // All registered sessions are child sessions (we check parentID before registering)
     // Just exclude self
     if (alias !== selfAlias) {
       agents.push({
         alias,
         description: getDescription(alias),
+        worktree: getWorktree(sessId),
       });
     }
   }

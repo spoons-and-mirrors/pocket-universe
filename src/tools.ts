@@ -29,6 +29,9 @@ import {
   resolveAlias,
   registerSession,
   MAX_MESSAGE_LENGTH,
+  setWorktree,
+  getWorktree,
+  removeWorktree,
 } from "./state";
 import {
   sendMessage,
@@ -44,6 +47,7 @@ import {
   markSpawnCompleted,
 } from "./messaging";
 import type { InternalClient } from "./types";
+import { createAgentWorktree, removeAgentWorktree } from "./worktree";
 
 // ============================================================================
 // Broadcast Tool
@@ -394,6 +398,12 @@ export function createSpawnTool(client: OpenCodeSessionClient) {
         registerSession(newSessionId);
         const newAlias = getAlias(newSessionId);
 
+        // Create isolated worktree for this agent (if in a git repo)
+        const worktreePath = await createAgentWorktree(newAlias, process.cwd());
+        if (worktreePath) {
+          setWorktree(newSessionId, worktreePath);
+        }
+
         log.info(LOG.TOOL, `spawn created session`, {
           callerAlias,
           newAlias,
@@ -503,6 +513,16 @@ export function createSpawnTool(client: OpenCodeSessionClient) {
             const spawn = activeSpawns.get(newSessionId);
             if (spawn) {
               await markSpawnCompleted(client, spawn);
+            }
+
+            // 3.5. Keep worktree - agent's changes are preserved
+            // User can manually merge changes from .worktrees/<alias>
+            const spawnWorktree = getWorktree(newSessionId);
+            if (spawnWorktree) {
+              log.info(LOG.TOOL, `Worktree preserved with agent's changes`, {
+                alias: newAlias,
+                worktree: spawnWorktree,
+              });
             }
 
             // 4. Pipe the spawn output to the caller

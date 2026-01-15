@@ -27,6 +27,7 @@ export const CLEANUP_INTERVAL_MS = 60 * 1000; // Run cleanup every minute
 export const DEFAULT_MODEL_ID = "gpt-4o-2024-08-06";
 export const DEFAULT_PROVIDER_ID = "openai";
 export const MAX_MESSAGE_LENGTH = 10000; // Prevent excessively long messages
+export const WORKTREES_DIR = ".worktrees"; // Directory for agent worktrees
 
 // ============================================================================
 // In-memory message store
@@ -78,6 +79,26 @@ export const activeSpawns = new Map<string, SpawnInfo>();
 // When agentA spawns agentB, we track that agentA has a pending spawn
 // Key: caller session ID, Value: Set of spawned session IDs
 export const callerPendingSpawns = new Map<string, Set<string>>();
+
+// ============================================================================
+// Worktree Tracking (isolated working directories per agent)
+// ============================================================================
+
+// Map sessionId -> absolute worktree path
+export const sessionWorktrees = new Map<string, string>();
+
+export function getWorktree(sessionId: string): string | undefined {
+  return sessionWorktrees.get(sessionId);
+}
+
+export function setWorktree(sessionId: string, worktreePath: string): void {
+  sessionWorktrees.set(sessionId, worktreePath);
+  log.info(LOG.SESSION, `Worktree assigned`, { sessionId, worktreePath });
+}
+
+export function removeWorktree(sessionId: string): void {
+  sessionWorktrees.delete(sessionId);
+}
 
 // ============================================================================
 // Session State Tracking (for broadcast resumption)

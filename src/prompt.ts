@@ -13,6 +13,7 @@ export const SPAWN_DESCRIPTION = `Spawn a new sibling agent to work on a task in
 export interface ParallelAgent {
   alias: string;
   description?: string;
+  worktree?: string; // Isolated working directory path
 }
 
 export interface HandledMessage {
@@ -41,11 +42,14 @@ export function broadcastResult(
   if (parallelAgents.length > 0) {
     lines.push(`Available agents:`);
     for (const agent of parallelAgents) {
+      let agentLine = `  - ${agent.alias}`;
       if (agent.description) {
-        lines.push(`  - ${agent.alias}: ${agent.description}`);
-      } else {
-        lines.push(`  - ${agent.alias}`);
+        agentLine += `: ${agent.description}`;
       }
+      if (agent.worktree) {
+        agentLine += ` [worktree: ${agent.worktree}]`;
+      }
+      lines.push(agentLine);
     }
   } else {
     lines.push(`No other agents available yet.`);
@@ -114,6 +118,13 @@ Use \`spawn\` to create new sibling agents for parallel work.
 ## IMPORTANT: Announce Yourself First
 Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.
 
+## Isolated Worktrees
+Each agent operates in its own isolated git worktree - a clean checkout from the last commit.
+- Your worktree path is shown in your system prompt (if available)
+- **ALL file operations should use paths relative to or within your worktree**
+- Do NOT modify files outside your assigned worktree
+- Other agents have their own worktrees - coordinate via broadcast, don't touch their files
+
 ## Sending Messages
 - \`broadcast(message="...")\` → announce yourself or send to all agents
 - \`broadcast(send_to="agentB", message="...")\` → send to specific agent
@@ -123,18 +134,18 @@ Your first action should be calling \`broadcast(message="what you're working on"
 - \`spawn(prompt="...", description="...")\` → create a sibling agent
 - **Fire-and-forget**: spawn() returns immediately, you continue working
 - **Output piping**: When spawned agent completes, its output arrives as a message
-- The main session waits for all spawns to complete before continuing
+- Spawned agents get their own isolated worktrees
 
 ## Receiving Messages
 Messages appear as synthetic \`broadcast\` tool results:
 \`\`\`
 {
-  agents: [{ name: "agentA", status: "Working on X" }],
+  agents: [{ name: "agentA", status: "Working on X", worktree: "/path/to/.worktrees/agentA" }],
   messages: [{ id: 1, from: "agentA", content: "..." }]
 }
 \`\`\`
 
-- **agents**: Other agents and their current status
+- **agents**: Other agents, their status, and their worktree paths
 - **messages**: Messages to reply to using \`reply_to\`
 
 When you receive output from a spawned agent, process it and incorporate the results.

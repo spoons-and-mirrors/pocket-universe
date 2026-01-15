@@ -16,6 +16,9 @@ import {
   sessionParentCache,
   childSessionCache,
   activeSpawns,
+  sessionWorktrees,
+  sessionToAlias,
+  agentDescriptions,
   PARENT_CACHE_TTL_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_PROVIDER_ID,
@@ -96,7 +99,7 @@ export function createInboxMessage(
   // Messages section shows replyable messages
   const outputData: {
     hint?: string;
-    agents?: Array<{ name: string; status?: string }>;
+    agents?: Array<{ name: string; status?: string; worktree?: string }>;
     messages?: Array<{ id: number; from: string; content: string }>;
   } = {};
 
@@ -111,6 +114,7 @@ export function createInboxMessage(
     outputData.agents = parallelAgents.map((agent) => ({
       name: agent.alias,
       status: agent.description,
+      worktree: agent.worktree,
     }));
   }
 
@@ -185,6 +189,113 @@ export function createInboxMessage(
             incoming_message: messages.length > 0,
             message_count: messages.length,
             agent_count: parallelAgents.length,
+          },
+          time: { start: now, end: now },
+        },
+      },
+    ],
+  };
+
+  if (userInfo.variant !== undefined) {
+    result.info.variant = userInfo.variant;
+  }
+
+  return result;
+}
+
+/**
+ * Create a synthetic worktree summary for the main session.
+ * Shows all active agent worktrees so main session knows where changes are.
+ */
+export function createWorktreeSummaryMessage(
+  sessionId: string,
+  baseUserMessage: UserMessage,
+): AssistantMessage | null {
+  // Collect all active worktrees with their agent info
+  const worktreeInfo: Array<{
+    alias: string;
+    description: string | undefined;
+    worktree: string;
+  }> = [];
+
+  for (const [sessId, worktreePath] of sessionWorktrees.entries()) {
+    const alias = sessionToAlias.get(sessId);
+    if (alias && worktreePath) {
+      worktreeInfo.push({
+        alias,
+        description: agentDescriptions.get(alias),
+        worktree: worktreePath,
+      });
+    }
+  }
+
+  // Don't inject if no worktrees
+  if (worktreeInfo.length === 0) {
+    return null;
+  }
+
+  const now = Date.now();
+  const userInfo = baseUserMessage.info;
+
+  const assistantMessageId = `msg_worktrees_${now}`;
+  const partId = `prt_worktrees_${now}`;
+  const callId = `call_worktrees_${now}`;
+
+  // Build structured output
+  const outputData = {
+    summary: "Active agent worktrees - each agent works in isolation",
+    worktrees: worktreeInfo.map((w) => ({
+      agent: w.alias,
+      task: w.description || "unknown",
+      path: w.worktree,
+    })),
+    note: "Changes made by agents are preserved in their worktrees. You may need to merge them.",
+  };
+
+  const output = JSON.stringify(outputData, null, 2);
+
+  log.info(LOG.MESSAGE, `Creating worktree summary for main session`, {
+    sessionId,
+    worktreeCount: worktreeInfo.length,
+    agents: worktreeInfo.map((w) => w.alias),
+  });
+
+  const result: AssistantMessage = {
+    info: {
+      id: assistantMessageId,
+      sessionID: sessionId,
+      role: "assistant",
+      agent: userInfo.agent || "code",
+      parentID: userInfo.id,
+      modelID: userInfo.model?.modelID || DEFAULT_MODEL_ID,
+      providerID: userInfo.model?.providerID || DEFAULT_PROVIDER_ID,
+      mode: "default",
+      path: { cwd: "/", root: "/" },
+      time: { created: now, completed: now },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [
+      {
+        id: partId,
+        sessionID: sessionId,
+        messageID: assistantMessageId,
+        type: "tool",
+        callID: callId,
+        tool: "pocket_universe_worktrees",
+        state: {
+          status: "completed",
+          input: { synthetic: true },
+          output,
+          title: `${worktreeInfo.length} agent worktree(s)`,
+          metadata: {
+            worktree_count: worktreeInfo.length,
+            agents: worktreeInfo.map((w) => w.alias),
           },
           time: { start: now, end: now },
         },

@@ -23,6 +23,8 @@ import {
   getAlias,
   setDescription,
   registerSession,
+  getWorktree,
+  setWorktree,
 } from "./state";
 import {
   resumeSessionWithBroadcast,
@@ -34,10 +36,12 @@ import {
   isChildSession,
   createInboxMessage,
   createSpawnTaskMessage,
+  createWorktreeSummaryMessage,
   fetchSpawnOutput,
   markSpawnCompleted,
 } from "./messaging";
 import { createBroadcastTool, createSpawnTool } from "./tools";
+import { createAgentWorktree } from "./worktree";
 
 // ============================================================================
 // Plugin
@@ -384,6 +388,18 @@ const plugin: Plugin = async (ctx) => {
       // Register child session early - before agent even calls broadcast
       registerSession(sessionId);
 
+      // Create worktree if not already created (for native task children)
+      // Spawned children already have worktrees created in spawn tool
+      let agentWorktree = getWorktree(sessionId);
+      if (!agentWorktree) {
+        const alias = getAlias(sessionId);
+        const newWorktree = await createAgentWorktree(alias, process.cwd());
+        if (newWorktree) {
+          setWorktree(sessionId, newWorktree);
+          agentWorktree = newWorktree;
+        }
+      }
+
       // Check if there's a pending task description for this session's parent
       const parentId = await getParentId(client, sessionId);
       if (parentId) {
@@ -413,12 +429,26 @@ const plugin: Plugin = async (ctx) => {
 
       // Inject Pocket Universe instructions
       output.system.push(SYSTEM_PROMPT);
+
+      // Inject agent's own worktree path if available
+      const worktreePath = getWorktree(sessionId);
+      if (worktreePath) {
+        output.system.push(`
+<worktree>
+Your isolated working directory: ${worktreePath}
+ALL file operations (read, write, edit, bash) should use paths within this directory.
+Do NOT modify files outside this worktree.
+</worktree>
+`);
+      }
+
       log.info(
         LOG.INJECT,
         `Registered session and injected Pocket Universe system prompt`,
         {
           sessionId,
           alias: getAlias(sessionId),
+          worktree: worktreePath || "none",
         },
       );
     },
@@ -472,12 +502,25 @@ const plugin: Plugin = async (ctx) => {
 
       // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
+        // For main sessions, inject worktree summary if there are active worktrees
+        const worktreeSummary = createWorktreeSummaryMessage(
+          sessionId,
+          lastUserMsg,
+        );
+        if (worktreeSummary) {
+          output.messages.push(worktreeSummary as unknown as UserMessage);
+          log.info(LOG.INJECT, `Injected worktree summary for main session`, {
+            sessionId,
+          });
+        }
+
         log.debug(
           LOG.INJECT,
           `Skipping Pocket Universe inbox for main session`,
           {
             sessionId,
             injectedSpawns: uninjectedSpawns.length,
+            hasWorktreeSummary: !!worktreeSummary,
           },
         );
         return;
