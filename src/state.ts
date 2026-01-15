@@ -303,3 +303,61 @@ export function registerSession(sessionId: string): void {
     registeringSessionsLock.delete(sessionId);
   }
 }
+
+// ============================================================================
+// Cleanup completed agents
+// ============================================================================
+
+/**
+ * Clean up all completed agents after the Pocket Universe Summary is injected.
+ * This prevents stale agents from appearing in getParallelAgents() for subsequent tasks.
+ *
+ * Called right after injectPocketUniverseSummaryToMain() succeeds.
+ * Clears all agent-related state so the next task batch starts fresh.
+ */
+export function cleanupCompletedAgents(): void {
+  // Collect stats for logging
+  const stats = {
+    sessions: activeSessions.size,
+    aliases: sessionToAlias.size,
+    descriptions: agentDescriptions.size,
+    inboxes: inboxes.size,
+    announced: announcedSessions.size,
+    worktrees: sessionWorktrees.size,
+    sessionStates: sessionStates.size,
+    childCache: childSessionCache.size,
+    presentedMsgs: presentedMessages.size,
+    pendingSpawns: pendingSpawns.size,
+    activeSpawns: activeSpawns.size,
+    callerPendingSpawns: callerPendingSpawns.size,
+  };
+
+  // Clear all agent-related state
+  activeSessions.clear();
+  sessionToAlias.clear();
+  aliasToSession.clear();
+  agentDescriptions.clear();
+  inboxes.clear();
+  sessionMsgCounter.clear();
+  announcedSessions.clear();
+  sessionWorktrees.clear();
+  sessionStates.clear();
+  childSessionCache.clear();
+  presentedMessages.clear();
+  pendingSpawns.clear();
+  activeSpawns.clear();
+  callerPendingSpawns.clear();
+  pendingTaskDescriptions.clear();
+
+  // Note: We do NOT clear summaryInjectedSessions here
+  // because that's used to track which main sessions got summaries
+  // (prevents double-injection for the same parent)
+
+  // Note: We do NOT clear sessionParentCache - that's a cache optimization
+  // and clearing it would just cause extra API calls
+
+  // Note: We do NOT reset nextAgentIndex - aliases continue incrementing
+  // across batches to avoid confusion (agentA in batch 1 vs agentA in batch 2)
+
+  log.info(LOG.SESSION, `Cleaned up completed agents`, stats);
+}

@@ -20,6 +20,7 @@ import {
   sessionToAlias,
   agentDescriptions,
   getStoredClient,
+  cleanupCompletedAgents,
   PARENT_CACHE_TTL_MS,
   DEFAULT_MODEL_ID,
   DEFAULT_PROVIDER_ID,
@@ -981,6 +982,10 @@ export async function injectPocketUniverseSummaryToMain(
     log.info(LOG.SESSION, `Pocket Universe Summary injected successfully`, {
       mainSessionId,
     });
+
+    // Clean up completed agents so they don't appear in getParallelAgents()
+    // for subsequent tasks in the main session
+    cleanupCompletedAgents();
 
     return true;
   } catch (e) {
