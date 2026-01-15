@@ -2,7 +2,7 @@
 
 ## An agentic closed loop with async capabilities
 
-Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This opencode plugin extends the native subagent paradigm to provide reliable closed loop async agents, blocking main thread execution, a _"pocket universe"_.
+Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This plugin extends the native opencode subagent paradigm to provide reliable closed loop async agents, blocking main thread execution, a _"pocket universe"_.
 
 ### Tools
 
