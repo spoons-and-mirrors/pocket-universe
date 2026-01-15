@@ -14,6 +14,13 @@ import {
   SUBAGENT_MISSING_PROMPT,
   subagentResult,
   type HandledMessage,
+  parentNotifyMessage,
+  SUBAGENT_CREATE_FAILED,
+  receivedSubagentOutput,
+  subagentError,
+  RECALL_DESCRIPTION,
+  recallNotFound,
+  RECALL_EMPTY,
 } from "./prompt";
 import { log, LOG } from "./logger";
 import type { OpenCodeSessionClient, ToolContext, SubagentInfo } from "./types";
@@ -357,7 +364,7 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
             await internalClient.post({
               url: `/session/${parentId}/notify_once`,
               body: {
-                text: `[Pocket Universe] Message from ${alias}: ${args.message}`,
+                text: parentNotifyMessage(alias, args.message),
               },
             });
             log.info(LOG.MESSAGE, `Parent session notified successfully`, {
@@ -439,7 +446,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           log.error(LOG.TOOL, `subagent failed to create session`, {
             callerAlias,
           });
-          return `Error: Failed to create session. No session ID returned.`;
+          return SUBAGENT_CREATE_FAILED;
         }
 
         // Pre-register the new session so it can immediately use broadcast
@@ -605,7 +612,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             });
 
             // Create a summary message with the subagent output
-            const outputMessage = `[Received ${newAlias} completed task]\n${subagentOutput}`;
+            const outputMessage = receivedSubagentOutput(newAlias, subagentOutput);
 
             // Check config: true = inbox mode (forced attention), false = user message mode
             const useInboxMode = isSubagentResultForcedAttention();
@@ -715,7 +722,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           callerAlias,
           error: String(e),
         });
-        return `Error: Failed to create subagent: ${String(e)}`;
+        return subagentError(String(e));
       }
     },
   });
@@ -724,16 +731,6 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
 // ============================================================================
 // Recall Tool
 // ============================================================================
-
-const RECALL_DESCRIPTION = `Recall the history and status of agents in this Pocket Universe.
-
-Use this to learn what previous agents accomplished, even if they completed before you started.
-
-- Call with no parameters to get all agents' status histories
-- Call with agent_name to get a specific agent's history
-- Call with agent_name AND show_output=true to also see their final output
-
-Output is only shown when requesting a specific agent with show_output=true.`;
 
 export function createRecallTool() {
   return tool({
@@ -766,9 +763,9 @@ export function createRecallTool() {
 
       if (result.agents.length === 0) {
         if (args.agent_name) {
-          return `No agent found with name '${args.agent_name}'.`;
+          return recallNotFound(args.agent_name);
         }
-        return `No agents in history yet.`;
+        return RECALL_EMPTY;
       }
 
       // Format nicely for LLM

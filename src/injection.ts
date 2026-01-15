@@ -11,6 +11,20 @@ import type {
   InternalClient,
 } from "./types";
 import type { ParallelAgent } from "./prompt";
+import {
+  ANNOUNCE_HINT,
+  agentCompletedMessage,
+  agentCompletedWithSummary,
+  subagentCompletedSummary,
+  subagentRunningMessage,
+  taskOutputWithMetadata,
+  subagentTaskOutput,
+  POCKET_UNIVERSE_SUMMARY_HEADER,
+  POCKET_UNIVERSE_AGENTS_INTRO,
+  WORKTREE_MERGE_NOTE,
+  WORKTREE_SUMMARY_HEADER,
+  WORKTREE_SUMMARY_NOTE,
+} from "./prompt";
 import { log, LOG } from "./logger";
 import {
   sessionParentCache,
@@ -202,8 +216,7 @@ export function createInboxMessage(
 
   // Add hint for first-time callers
   if (!hasAnnounced) {
-    outputData.hint =
-      "Call broadcast(message='what you are working on') to announce yourself first.";
+    outputData.hint = ANNOUNCE_HINT;
   }
 
   // Build agents section from parallelAgents (status comes from agentDescriptions)
@@ -348,13 +361,13 @@ export function createWorktreeSummaryMessage(
 
   // Build structured output
   const outputData = {
-    summary: "Active agent worktrees - each agent works in isolation",
+    summary: WORKTREE_SUMMARY_HEADER,
     worktrees: worktreeInfo.map((w) => ({
       agent: w.alias,
       task: w.description || "unknown",
       path: w.worktree,
     })),
-    note: "Changes made by agents are preserved in their worktrees. You may need to merge them.",
+    note: WORKTREE_SUMMARY_NOTE,
   };
 
   const output = JSON.stringify(outputData, null, 2);
@@ -432,12 +445,11 @@ export function createSubagentTaskMessage(
   const callId = `call_sub_${subagent.sessionId.slice(-12)}`;
 
   // Build output similar to what task tool produces
-  const output = `Subagent ${subagent.alias} is running.
-Task: ${subagent.description}
-
-<task_metadata>
-session_id: ${subagent.sessionId}
-</task_metadata>`;
+  const output = subagentTaskOutput(
+    subagent.alias,
+    subagent.description,
+    subagent.sessionId,
+  );
 
   log.info(LOG.MESSAGE, `Creating synthetic task injection`, {
     parentSessionId,
@@ -562,7 +574,7 @@ export async function injectTaskPartToParent(
           prompt: subagent.prompt,
           subagent_type: "general",
         },
-        output: `Subagent ${subagent.alias} is running in parallel.\nSession: ${subagent.sessionId}`,
+        output: subagentRunningMessage(subagent.alias, subagent.sessionId),
         title: subagent.description,
         metadata: {
           sessionId: subagent.sessionId,
@@ -673,7 +685,7 @@ export async function fetchSubagentOutput(
         sessionId,
         alias,
       });
-      return `Agent ${alias} completed.\nSession: ${sessionId}`;
+      return agentCompletedMessage(alias, sessionId);
     }
 
     // Find assistant messages and extract text parts (like native Task tool does)
@@ -686,7 +698,7 @@ export async function fetchSubagentOutput(
         sessionId,
         alias,
       });
-      return `Agent ${alias} completed.\nSession: ${sessionId}`;
+      return agentCompletedMessage(alias, sessionId);
     }
 
     // Get the last assistant message
@@ -709,12 +721,7 @@ export async function fetchSubagentOutput(
         textLength: text.length,
       });
       // Format like native Task tool does
-      return (
-        text +
-        "\n\n<task_metadata>\nsession_id: " +
-        sessionId +
-        "\n</task_metadata>"
-      );
+      return taskOutputWithMetadata(text, sessionId);
     }
 
     // Fallback: summarize tool calls if no text
@@ -728,17 +735,17 @@ export async function fetchSubagentOutput(
           return `- ${part.tool}: ${part.state?.title || "completed"}`;
         })
         .join("\n");
-      return `Agent ${alias} completed:\n${summary}\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+      return agentCompletedWithSummary(alias, summary, sessionId);
     }
 
-    return `Agent ${alias} completed.\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+    return taskOutputWithMetadata(`Agent ${alias} completed.`, sessionId);
   } catch (e) {
     log.error(LOG.TOOL, `Failed to fetch subagent output`, {
       sessionId,
       alias,
       error: String(e),
     });
-    return `Agent ${alias} completed.\nSession: ${sessionId}`;
+    return agentCompletedMessage(alias, sessionId);
   }
 }
 
@@ -824,7 +831,10 @@ export async function markSubagentCompleted(
   }
 
   // Summary only - full output is piped to the caller, not stored here
-  const summaryOutput = `Agent ${subagent.alias} completed successfully.\nOutput was piped to the caller.\n\n<task_metadata>\nsession_id: ${subagent.sessionId}\n</task_metadata>`;
+  const summaryOutput = subagentCompletedSummary(
+    subagent.alias,
+    subagent.sessionId,
+  );
 
   const completedPart = {
     id: subagent.partId,
@@ -922,9 +932,9 @@ export function generatePocketUniverseSummary(): string | null {
 
   // Build the summary
   const lines: string[] = [];
-  lines.push(`[Pocket Universe Summary]`);
+  lines.push(POCKET_UNIVERSE_SUMMARY_HEADER);
   lines.push(``);
-  lines.push(`The following agents completed their work:`);
+  lines.push(POCKET_UNIVERSE_AGENTS_INTRO);
   lines.push(``);
 
   for (const agent of agents) {
@@ -942,9 +952,7 @@ export function generatePocketUniverseSummary(): string | null {
   }
 
   if (isWorktreeEnabled()) {
-    lines.push(
-      `Note: Agent changes are preserved in their worktrees. Review and merge as needed.`,
-    );
+    lines.push(WORKTREE_MERGE_NOTE);
   }
 
   return lines.join("\n");

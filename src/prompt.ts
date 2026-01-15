@@ -106,6 +106,162 @@ export const SUBAGENT_NOT_CHILD_SESSION = `Error: subagent can only be called fr
 export const SUBAGENT_MISSING_PROMPT = `Error: 'prompt' parameter is required.`;
 
 // =============================================================================
+// Resume/Broadcast prompts
+// =============================================================================
+
+/** Used to notify an agent that a new message arrived (duplicate removed from messaging.ts + index.ts) */
+export function resumeBroadcastPrompt(senderAlias: string): string {
+  return `[Broadcast from ${senderAlias}]: New message received. Check your inbox.`;
+}
+
+// =============================================================================
+// Inbox injection prompts (from injection.ts)
+// =============================================================================
+
+export const ANNOUNCE_HINT = `Call broadcast(message='what you are working on') to announce yourself first.`;
+
+// =============================================================================
+// Agent completion prompts (from injection.ts)
+// =============================================================================
+
+export function agentCompletedMessage(
+  alias: string,
+  sessionId?: string,
+): string {
+  if (sessionId) {
+    return `Agent ${alias} completed.\nSession: ${sessionId}`;
+  }
+  return `Agent ${alias} completed.`;
+}
+
+export function agentCompletedWithSummary(
+  alias: string,
+  summary: string,
+  sessionId: string,
+): string {
+  return `Agent ${alias} completed:\n${summary}\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+}
+
+export function subagentCompletedSummary(
+  alias: string,
+  sessionId: string,
+): string {
+  return `Agent ${alias} completed successfully.\nOutput was piped to the caller.\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+}
+
+export function subagentRunningMessage(
+  alias: string,
+  sessionId: string,
+): string {
+  return `Subagent ${alias} is running in parallel.\nSession: ${sessionId}`;
+}
+
+export function wrapTaskMetadata(sessionId: string): string {
+  return `\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+}
+
+export function taskOutputWithMetadata(
+  text: string,
+  sessionId: string,
+): string {
+  return text + wrapTaskMetadata(sessionId);
+}
+
+// =============================================================================
+// Pocket Universe Summary prompts (from injection.ts)
+// =============================================================================
+
+export const POCKET_UNIVERSE_SUMMARY_HEADER = `[Pocket Universe Summary]`;
+export const POCKET_UNIVERSE_AGENTS_INTRO = `The following agents completed their work:`;
+export const WORKTREE_MERGE_NOTE = `Note: Agent changes are preserved in their worktrees. Review and merge as needed.`;
+
+// =============================================================================
+// Subagent output prompts (from messaging.ts and tools.ts)
+// =============================================================================
+
+export function formatSubagentOutput(alias: string, output: string): string {
+  return `[Subagent ${alias} completed]\n\n<agent_output from="${alias}">\n${output}\n</agent_output>`;
+}
+
+export function receivedSubagentOutput(alias: string, output: string): string {
+  return `[Received ${alias} completed task]\n${output}`;
+}
+
+// =============================================================================
+// Parent notification prompts (from tools.ts)
+// =============================================================================
+
+export function parentNotifyMessage(alias: string, message: string): string {
+  return `[Pocket Universe] Message from ${alias}: ${message}`;
+}
+
+// =============================================================================
+// Subagent error prompts (from tools.ts)
+// =============================================================================
+
+export const SUBAGENT_CREATE_FAILED = `Error: Failed to create session. No session ID returned.`;
+
+export function subagentError(error: string): string {
+  return `Error: Failed to create subagent: ${error}`;
+}
+
+// =============================================================================
+// Recall tool prompts (from tools.ts and state.ts)
+// =============================================================================
+
+export const RECALL_DESCRIPTION = `Recall the history and status of agents in this Pocket Universe.
+
+Use this to learn what previous agents accomplished, even if they completed before you started.
+
+- Call with no parameters to get all agents' status histories
+- Call with agent_name to get a specific agent's history
+- Call with agent_name AND show_output=true to also see their final output
+
+Output is only shown when requesting a specific agent with show_output=true.`;
+
+export function recallNotFound(agentName: string): string {
+  return `No agent found with name '${agentName}'.`;
+}
+
+export const RECALL_EMPTY = `No agents in history yet.`;
+
+export const RECALL_AGENT_ACTIVE = `[Agent is still active - no output yet]`;
+export const RECALL_AGENT_IDLE_NO_OUTPUT = `[Agent is idle but has not produced output yet]`;
+
+// =============================================================================
+// Worktree system prompt (from index.ts)
+// =============================================================================
+
+export function getWorktreeSystemPrompt(worktreePath: string): string {
+  return `
+<worktree>
+Your isolated working directory: ${worktreePath}
+ALL file operations (read, write, edit, bash) should use paths within this directory.
+Do NOT modify files outside this worktree.
+</worktree>
+`;
+}
+
+// =============================================================================
+// Worktree summary prompts (from injection.ts)
+// =============================================================================
+
+export const WORKTREE_SUMMARY_HEADER = `Active agent worktrees - each agent works in isolation`;
+export const WORKTREE_SUMMARY_NOTE = `Changes made by agents are preserved in their worktrees. You may need to merge them.`;
+
+// =============================================================================
+// Task injection prompts (from injection.ts)
+// =============================================================================
+
+export function subagentTaskOutput(
+  alias: string,
+  description: string,
+  sessionId: string,
+): string {
+  return `Subagent ${alias} is running.\nTask: ${description}\n\n<task_metadata>\nsession_id: ${sessionId}\n</task_metadata>`;
+}
+
+// =============================================================================
 // System prompt injection
 // =============================================================================
 

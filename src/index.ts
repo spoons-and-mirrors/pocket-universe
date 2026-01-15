@@ -1,5 +1,9 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { getSystemPrompt } from "./prompt";
+import {
+  getSystemPrompt,
+  resumeBroadcastPrompt,
+  getWorktreeSystemPrompt,
+} from "./prompt";
 import { log, LOG } from "./logger";
 import type {
   OpenCodeSessionClient,
@@ -225,7 +229,7 @@ const plugin: Plugin = async (ctx) => {
           // 3. Wait for that prompt to complete
           // 4. Then session.before_complete fires again (recursively)
           // This avoids the deadlock of calling prompt() from within the hook
-          output.resumePrompt = `[Broadcast from ${firstUnread.from}]: New message received. Check your inbox.`;
+          output.resumePrompt = resumeBroadcastPrompt(firstUnread.from);
 
           log.info(
             LOG.SESSION,
@@ -598,13 +602,7 @@ const plugin: Plugin = async (ctx) => {
       if (isWorktreeEnabled()) {
         const worktreePath = getWorktree(sessionId);
         if (worktreePath) {
-          output.system.push(`
-<worktree>
-Your isolated working directory: ${worktreePath}
-ALL file operations (read, write, edit, bash) should use paths within this directory.
-Do NOT modify files outside this worktree.
-</worktree>
-`);
+          output.system.push(getWorktreeSystemPrompt(worktreePath));
         }
       }
 

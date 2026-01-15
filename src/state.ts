@@ -11,6 +11,7 @@ import type {
   OpenCodeSessionClient,
 } from "./types";
 import { log, LOG } from "./logger";
+import { RECALL_AGENT_ACTIVE, RECALL_AGENT_IDLE_NO_OUTPUT } from "./prompt";
 
 // ============================================================================
 // Constants
@@ -152,9 +153,9 @@ export function recallAgents(
       if (storedOutput) {
         entry.output = storedOutput;
       } else if (state === "active") {
-        entry.output = "[Agent is still active - no output yet]";
+        entry.output = RECALL_AGENT_ACTIVE;
       } else {
-        entry.output = "[Agent is idle but has not produced output yet]";
+        entry.output = RECALL_AGENT_IDLE_NO_OUTPUT;
       }
     }
     results.push(entry);

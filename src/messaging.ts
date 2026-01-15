@@ -4,6 +4,7 @@
 
 import type { Message } from "./types";
 import type { ParallelAgent, HandledMessage } from "./prompt";
+import { resumeBroadcastPrompt, formatSubagentOutput } from "./prompt";
 import { log, LOG } from "./logger";
 import {
   sessionToAlias,
@@ -100,7 +101,7 @@ export async function resumeSessionWithBroadcast(
   try {
     // Format the resume prompt - DON'T include full message content
     // because the synthetic injection will show it. Just notify that new messages arrived.
-    const resumePrompt = `[Broadcast from ${senderAlias}]: New message received. Check your inbox.`;
+    const resumePrompt = resumeBroadcastPrompt(senderAlias);
 
     // Mark session as active before resuming
     const state = sessionStates.get(recipientSessionId);
@@ -201,11 +202,7 @@ export async function resumeWithSubagentOutput(
   const recipientAlias = sessionToAlias.get(recipientSessionId) || "unknown";
 
   // Format the output message
-  const formattedOutput = `[Subagent ${senderAlias} completed]
-
-<agent_output from="${senderAlias}">
-${subagentOutput}
-</agent_output>`;
+  const formattedOutput = formatSubagentOutput(senderAlias, subagentOutput);
 
   const storedClient = getStoredClient();
   if (storedClient) {
