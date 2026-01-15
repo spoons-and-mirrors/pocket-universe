@@ -53,7 +53,8 @@ sequenceDiagram
 "plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
 ```
 
-## Tools
+<details>
+<summary>Tools</summary>
 
 ### `broadcast` — Inter-agent messaging
 
@@ -82,11 +83,14 @@ spawn(prompt="Build the login form", description="Login UI")
 
 **Key behavior:**
 
-- **Fire-and-forget**: `spawn()` returns immediately, caller continues working
-- **Output piping**: When spawned agent completes, its output arrives as a message
-- **Main blocks**: The main session waits for ALL spawns and resumed sessions
+- **Async firing**: `spawn()` returns immediately, caller continues working
+- **Output piping**: When spawned agent completes, its output arrives as a message in the caller session (and wakes it if idle)
+- **Main thread block**: The main session waits for ALL subagents to complete before continuing
 
-## Session Lifecycle
+</details>
+
+<details>
+<summary>Session Lifecycle</summary>
 
 ```mermaid
 flowchart TD
@@ -112,7 +116,10 @@ The `session.before_complete` hook ensures no work is left behind:
 6. Only when nothing pending does the session complete
 7. Main session continues with the complete result
 
-## Session Resumption
+</details>
+
+<details>
+<summary>Session Resumption</summary>
 
 Idle agents automatically wake up when they receive messages:
 
@@ -132,7 +139,10 @@ sequenceDiagram
     A->>B: broadcast(reply_to=1, message="Answer!")
 ```
 
-## Receiving Messages
+</details>
+
+<details>
+<summary>Receiving Messages</summary>
 
 Messages appear as synthetic `broadcast` tool results:
 
@@ -153,60 +163,10 @@ Messages appear as synthetic `broadcast` tool results:
 - **`agents`** — All sibling agents and their status (always visible)
 - **`messages`** — Inbox messages, reply using `reply_to`
 
-## Example: Parallel Work with Spawn
+</details>
 
-```
-Main Session:
-  -> task(prompt="Build feature X")
-
-AgentA:
-  -> broadcast(message="Building feature X")
-  -> spawn(prompt="Create the API", description="API work")
-     # Returns immediately, agentA continues
-  -> ... does frontend work ...
-  -> Finishes own work
-
-  # Before completing:
-  # - Waits for spawned agentB
-  # - agentB completes, output piped to agentA
-  # - agentA resumed to process output
-
-  -> Sees agentB's API output in inbox
-  -> Integrates API with frontend
-  -> Completes with full result
-
-Main Session:
-  -> Receives complete result (frontend + API integrated)
-```
-
-## Architecture
-
-| Component                 | Purpose                                                    |
-| ------------------------- | ---------------------------------------------------------- |
-| `broadcast`               | Send/receive messages between agents                       |
-| `spawn`                   | Create sibling agents (fire-and-forget with output piping) |
-| Isolated worktrees        | Each agent gets its own git worktree (clean from HEAD)     |
-| Synthetic injection       | Show agents + messages on every LLM call                   |
-| `session.before_complete` | Wait for spawns, trigger resumes                           |
-| Output piping             | Spawned agent output → caller inbox                        |
-| Session resumption        | Wake idle agents on new messages                           |
-| Worktree summary          | Main session sees all agent worktrees                      |
-
-## OpenCode Hook
-
-Pocket Universe uses the `session.before_complete` hook:
-
-```typescript
-"session.before_complete"?: (
-  input: { sessionID: string; parentSessionID?: string },
-  output: { waitForSessions: string[]; resumePrompt?: string },
-) => Promise<void>
-```
-
-- `waitForSessions` — Session IDs to wait for before completing
-- `resumePrompt` — If set, starts a new prompt cycle and waits for it
-
-## Isolated Worktrees
+<details>
+<summary>Isolated Worktrees</summary>
 
 Each agent operates in its own **git worktree** — a clean checkout from the last commit (HEAD). This provides isolation so agents can work in parallel without conflicting with each other.
 
@@ -241,52 +201,11 @@ Do NOT modify files outside this worktree.
 
 ### Broadcast Shows Worktrees
 
-When agents see each other via broadcast, worktree paths are included:
-
-```json
-{
-  "agents": [
-    {
-      "name": "agentA",
-      "status": "Building frontend",
-      "worktree": "/repo/.worktrees/agentA"
-    },
-    {
-      "name": "agentB",
-      "status": "Creating API",
-      "worktree": "/repo/.worktrees/agentB"
-    }
-  ]
-}
-```
+When agents see each other via broadcast, worktree paths are included so they know where each agent is working.
 
 ### Main Session Worktree Summary
 
-The main session sees a synthetic `pocket_universe_worktrees` tool result showing all active worktrees:
-
-```json
-{
-  "summary": "Active agent worktrees - each agent works in isolation",
-  "worktrees": [
-    {
-      "agent": "agentA",
-      "task": "Building frontend",
-      "path": "/repo/.worktrees/agentA"
-    },
-    {
-      "agent": "agentB",
-      "task": "Creating API",
-      "path": "/repo/.worktrees/agentB"
-    },
-    {
-      "agent": "agentC",
-      "task": "Writing tests",
-      "path": "/repo/.worktrees/agentC"
-    }
-  ],
-  "note": "Changes made by agents are preserved in their worktrees. You may need to merge them."
-}
-```
+The main session receives a summary showing all active agent worktrees, their tasks, and their paths.
 
 ### Worktree Lifecycle
 
@@ -298,34 +217,87 @@ The main session sees a synthetic `pocket_universe_worktrees` tool result showin
 
 **Important:** Worktrees are **not deleted** when agents complete. The agent's changes are preserved for you to review and merge manually.
 
-### Merging Changes
-
-After agents complete, you can merge their changes:
-
-```bash
-# See what changed in agentA's worktree
-cd .worktrees/agentA
-git diff HEAD
-
-# Option 1: Cherry-pick specific commits
-git log --oneline  # Find commit hashes
-cd /repo
-git cherry-pick <hash>
-
-# Option 2: Copy files manually
-cp .worktrees/agentA/src/feature.ts src/
-
-# Option 3: Create a branch and merge
-cd .worktrees/agentA
-git checkout -b feature/agentA-work
-git push origin feature/agentA-work
-cd /repo
-git merge feature/agentA-work
-
-# Cleanup when done
-git worktree remove .worktrees/agentA
-```
-
 ### Limitations
 
 Worktree isolation relies on agents following instructions to use their assigned paths. The LLM may occasionally write to the wrong location. For guaranteed isolation, OpenCode core changes would be needed (per-session working directory).
+
+</details>
+
+<details>
+<summary>Configuration</summary>
+
+Pocket Universe uses feature flags to control optional functionality. Configuration is loaded from two locations (in priority order):
+
+1. **Project-specific:** `.pocket-universe.jsonc` in your current directory
+2. **Global:** `~/.config/opencode/pocket-universe.jsonc` (auto-created if missing)
+
+### Config File Format
+
+```jsonc
+{
+  "worktree": false,
+  "spawn": true,
+  "logging": false,
+}
+```
+
+### Feature Flags
+
+| Flag       | Default | Description                                                             |
+| ---------- | ------- | ----------------------------------------------------------------------- |
+| `worktree` | `false` | Create isolated git worktrees for each agent                            |
+| `spawn`    | `true`  | Enable the `spawn` tool for creating sibling agents                     |
+| `logging`  | `false` | Write debug logs to `~/.config/opencode/plugin/iam/pocket-universe.log` |
+
+### Behavior When Disabled
+
+**`worktree: false`**
+
+- No worktrees are created
+- Worktree sections are hidden from system prompts and broadcasts
+- Agents work in the main repository (potential for conflicts)
+
+**`spawn: false`**
+
+- The `spawn` tool is not registered
+- Agents cannot create new sibling agents
+- Spawn instructions are hidden from the system prompt
+
+**`logging: false`**
+
+- No log file is created
+- Reduces disk I/O
+
+### Example Configurations
+
+**Minimal setup (no worktrees, no logging):**
+
+```jsonc
+{
+  "worktree": false,
+  "spawn": true,
+  "logging": false,
+}
+```
+
+**Full isolation with worktrees:**
+
+```jsonc
+{
+  "worktree": true,
+  "spawn": true,
+  "logging": true,
+}
+```
+
+**Simple parallel work (no spawn, no worktrees):**
+
+```jsonc
+{
+  "worktree": false,
+  "spawn": false,
+  "logging": false,
+}
+```
+
+</details>
