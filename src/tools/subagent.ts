@@ -9,6 +9,7 @@ import {
   SUBAGENT_MISSING_PROMPT,
   subagentResult,
   SUBAGENT_CREATE_FAILED,
+  subagentMaxDepth,
   receivedSubagentOutput,
   subagentError,
 } from "../prompts/subagent.prompts";
@@ -38,12 +39,17 @@ import {
 } from "../messaging";
 import {
   getParentId,
+  getSessionDepth,
   injectTaskPartToParent,
   fetchSubagentOutput,
   markSubagentCompleted,
 } from "../injection/index";
 import { createAgentWorktree } from "../worktree";
-import { isWorktreeEnabled, isSubagentResultForcedAttention } from "../config";
+import {
+  getMaxSubagentDepth,
+  isWorktreeEnabled,
+  isSubagentResultForcedAttention,
+} from "../config";
 
 // ============================================================================
 // Helper: Get caller's agent and model info from their session messages
@@ -159,6 +165,17 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           sessionId,
         });
         return SUBAGENT_NOT_CHILD_SESSION;
+      }
+
+      const depth = await getSessionDepth(client, sessionId);
+      const maxDepth = getMaxSubagentDepth();
+      if (depth >= maxDepth) {
+        log.warn(LOG.TOOL, `subagent max depth reached`, {
+          sessionId,
+          depth,
+          maxDepth,
+        });
+        return subagentMaxDepth(depth, maxDepth);
       }
 
       const callerAlias = getAlias(sessionId);

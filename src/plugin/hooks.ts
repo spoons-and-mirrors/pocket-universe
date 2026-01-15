@@ -37,6 +37,7 @@ import {
 } from "../messaging";
 import {
   getParentId,
+  getSessionDepth,
   isChildSession,
   createInboxMessage,
   createSubagentTaskMessage,
@@ -46,7 +47,7 @@ import {
   createSummaryCoverMessage,
 } from "../injection/index";
 import { createAgentWorktree } from "../worktree";
-import { isWorktreeEnabled } from "../config";
+import { getMaxSubagentDepth, isWorktreeEnabled } from "../config";
 
 export function createHooks(client: OpenCodeSessionClient) {
   return {
@@ -561,8 +562,18 @@ export function createHooks(client: OpenCodeSessionClient) {
         }
       }
 
+      const depth = await getSessionDepth(client, sessionId);
+      const maxDepth = getMaxSubagentDepth();
+      const allowSubagent = depth < maxDepth;
+
       // Inject Pocket Universe instructions (dynamically generated based on config)
-      output.system.push(getSystemPrompt());
+      output.system.push(
+        getSystemPrompt({
+          allowSubagent,
+          depth,
+          maxDepth,
+        }),
+      );
 
       // Inject agent's own worktree path if worktree feature is enabled
       if (isWorktreeEnabled()) {

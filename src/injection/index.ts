@@ -1,4 +1,9 @@
-export { getParentId, isChildSession, getParentIdForSubagent } from "./session";
+export {
+  getParentId,
+  isChildSession,
+  getSessionDepth,
+  getParentIdForSubagent,
+} from "./session";
 export { createInboxMessage } from "./inbox";
 export {
   createSummaryCoverMessage,

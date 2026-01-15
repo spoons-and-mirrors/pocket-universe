@@ -16,6 +16,10 @@ export const SUBAGENT_MISSING_PROMPT = `Error: 'prompt' parameter is required.`;
 
 export const SUBAGENT_CREATE_FAILED = `Error: Failed to create session. No session ID returned.`;
 
+export function subagentMaxDepth(depth: number, maxDepth: number): string {
+  return `Error: Maximum subagent depth reached (${depth}/${maxDepth}). This session cannot spawn more subagents.`;
+}
+
 export function subagentError(error: string): string {
   return `Error: Failed to create subagent: ${error}`;
 }

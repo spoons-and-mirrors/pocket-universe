@@ -63,6 +63,28 @@ export async function isChildSession(
 }
 
 /**
+ * Get the depth of a session in the tree (main session = 1).
+ */
+export async function getSessionDepth(
+  client: OpenCodeSessionClient,
+  sessionId: string,
+): Promise<number> {
+  let depth = 1;
+  let currentId: string | null = sessionId;
+
+  while (currentId) {
+    const parentId = await getParentId(client, currentId);
+    if (!parentId) {
+      break;
+    }
+    depth += 1;
+    currentId = parentId;
+  }
+
+  return depth;
+}
+
+/**
  * Get the parent ID for a subagent session.
  * Subagent sessions are children of the main session (grandparent of caller).
  */

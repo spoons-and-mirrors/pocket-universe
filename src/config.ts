@@ -20,6 +20,11 @@ export interface PocketUniverseConfig {
   /** Enable debug logging to .logs/pocket-universe.log (default: false) */
   logging: boolean;
   /**
+   * Max subagent nesting depth (main session = 1).
+   * At max depth, subagent tool cannot spawn more subagents.
+   */
+  max_subagent_depth: number;
+  /**
    * When true (default), subagent results appear in the broadcast inbox
    * via synthetic injection. When false, subagent results are injected
    * as a persisted user message, forcing immediate LLM attention.
@@ -36,6 +41,7 @@ const DEFAULT_CONFIG: PocketUniverseConfig = {
   subagent: true,
   recall: true,
   logging: false,
+  max_subagent_depth: 3,
   subagent_result_forced_attention: true,
 };
 
@@ -157,6 +163,7 @@ function loadConfig(): PocketUniverseConfig {
         subagent: loadedConfig.subagent,
         recall: loadedConfig.recall,
         logging: loadedConfig.logging,
+        max_subagent_depth: loadedConfig.max_subagent_depth,
         subagent_result_forced_attention:
           loadedConfig.subagent_result_forced_attention,
       });
@@ -206,6 +213,14 @@ export function isLoggingEnabled(): boolean {
 }
 
 /**
+ * Get max subagent nesting depth (minimum 1)
+ */
+export function getMaxSubagentDepth(): number {
+  const depth = Number(loadConfig().max_subagent_depth);
+  return Number.isFinite(depth) && depth >= 1 ? depth : 1;
+}
+
+/**
  * Check if subagent result forced attention mode is enabled
  */
 export function isSubagentResultForcedAttention(): boolean {
@@ -243,6 +258,9 @@ export function getConfigTemplate(): string {
 
   // Enable debug logging to .logs/pocket-universe.log
   "logging": false,
+
+  // Max subagent nesting depth (main session = 1)
+  "max_subagent_depth": 3,
 
   // When true (default), subagent results appear in broadcast inbox.
   // When false, subagent results are injected as persisted user message.
