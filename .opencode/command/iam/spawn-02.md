@@ -7,3 +7,7 @@ use a TASK Tool a prompt it with this EXACT prompt:
 - while the asubagent is doing its thing, tell me a JOKE, RIGHT AFTER YOU CALLED SPAWN
 - THEN, tell me what the other agent said VERBATIM.
   "
+
+---
+
+use a new task tool and prompt it with "please tell me what agents are available right now, and what is your agent name?"

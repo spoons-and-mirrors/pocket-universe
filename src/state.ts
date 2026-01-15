@@ -89,6 +89,10 @@ export const callerPendingSubagents = new Map<string, Set<string>>();
 // Key: main session ID, Value: Set of active child session IDs
 export const mainSessionActiveChildren = new Map<string, Set<string>>();
 
+// Track completed first-level children to prevent re-adding them after completion
+// Key: main session ID, Value: Set of completed child session IDs
+export const completedFirstLevelChildren = new Map<string, Set<string>>();
+
 // ============================================================================
 // Worktree Tracking (isolated working directories per agent)
 // ============================================================================
@@ -336,6 +340,7 @@ export function cleanupCompletedAgents(): void {
     activeSubagents: activeSubagents.size,
     callerPendingSubagents: callerPendingSubagents.size,
     mainSessionActiveChildren: mainSessionActiveChildren.size,
+    completedFirstLevelChildren: completedFirstLevelChildren.size,
   };
 
   // Clear all agent-related state
@@ -354,6 +359,7 @@ export function cleanupCompletedAgents(): void {
   activeSubagents.clear();
   callerPendingSubagents.clear();
   mainSessionActiveChildren.clear();
+  completedFirstLevelChildren.clear();
   pendingTaskDescriptions.clear();
 
   // Note: We do NOT clear summaryInjectedSessions here

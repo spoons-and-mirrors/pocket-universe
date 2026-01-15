@@ -22,6 +22,7 @@ import {
   activeSubagents,
   callerPendingSubagents,
   mainSessionActiveChildren,
+  completedFirstLevelChildren,
   setStoredClient,
   getAlias,
   setDescription,
@@ -216,6 +217,14 @@ const plugin: Plugin = async (ctx) => {
             const children = mainSessionActiveChildren.get(parentId);
             if (children) {
               children.delete(input.sessionID);
+
+              // Mark this child as completed so it doesn't get re-added
+              let completed = completedFirstLevelChildren.get(parentId);
+              if (!completed) {
+                completed = new Set();
+                completedFirstLevelChildren.set(parentId, completed);
+              }
+              completed.add(input.sessionID);
 
               log.info(LOG.SESSION, `First-level child completed`, {
                 childSessionId: input.sessionID,
@@ -484,20 +493,33 @@ const plugin: Plugin = async (ctx) => {
         // Check if this is a first-level child (parent is main session)
         const grandparentId = await getParentId(client, parentId);
         if (!grandparentId) {
-          // Parent is main session - track this child
-          let children = mainSessionActiveChildren.get(parentId);
-          if (!children) {
-            children = new Set();
-            mainSessionActiveChildren.set(parentId, children);
-          }
-          children.add(sessionId);
+          // Parent is main session - track this child (unless already completed)
+          const completed = completedFirstLevelChildren.get(parentId);
+          if (completed?.has(sessionId)) {
+            log.debug(
+              LOG.HOOK,
+              `Skipping tracking for completed first-level child`,
+              {
+                childSessionId: sessionId,
+                mainSessionId: parentId,
+                alias: getAlias(sessionId),
+              },
+            );
+          } else {
+            let children = mainSessionActiveChildren.get(parentId);
+            if (!children) {
+              children = new Set();
+              mainSessionActiveChildren.set(parentId, children);
+            }
+            children.add(sessionId);
 
-          log.info(LOG.HOOK, `Tracking first-level child for main session`, {
-            childSessionId: sessionId,
-            mainSessionId: parentId,
-            alias: getAlias(sessionId),
-            activeChildrenCount: children.size,
-          });
+            log.info(LOG.HOOK, `Tracking first-level child for main session`, {
+              childSessionId: sessionId,
+              mainSessionId: parentId,
+              alias: getAlias(sessionId),
+              activeChildrenCount: children.size,
+            });
+          }
         }
 
         const pending = pendingTaskDescriptions.get(parentId);
@@ -676,12 +698,14 @@ Do NOT modify files outside this worktree.
 
       // Create ONE bundled message with all pending messages
       const hasAnnounced = announcedSessions.has(sessionId);
+      const selfAlias = getAlias(sessionId);
       const inboxMsg = createInboxMessage(
         sessionId,
         unhandled,
         lastUserMsg,
         parallelAgents,
         hasAnnounced,
+        selfAlias,
       );
 
       // Mark all injected messages as "presented" to prevent double-delivery via resume

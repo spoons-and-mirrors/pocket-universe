@@ -183,6 +183,7 @@ export function createInboxMessage(
   lastUserMessage: UserMessage,
   parallelAgents: ParallelAgent[],
   hasAnnounced: boolean,
+  selfAlias: string,
 ): AssistantMessage {
   const now = Date.now();
   const userInfo = lastUserMessage.info;
@@ -191,10 +192,13 @@ export function createInboxMessage(
   // Agents section shows available agents and their status history (not replyable)
   // Messages section shows replyable messages
   const outputData: {
+    you_are: string;
     hint?: string;
     agents?: Array<{ name: string; status?: string[]; worktree?: string }>;
     messages?: Array<{ id: number; from: string; content: string }>;
-  } = {};
+  } = {
+    you_are: selfAlias,
+  };
 
   // Add hint for first-time callers
   if (!hasAnnounced) {
