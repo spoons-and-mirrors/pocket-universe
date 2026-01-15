@@ -678,14 +678,8 @@ Do NOT modify files outside this worktree.
         parallelAgentCount: parallelAgents.length,
       });
 
-      // Inject if there are messages OR other agents to show
-      if (unhandled.length === 0 && parallelAgents.length === 0) {
-        log.info(LOG.INJECT, `No agents or messages to inject`, {
-          sessionId,
-          alias: getAlias(sessionId),
-        });
-        return;
-      }
+      // Always inject inbox for child sessions - even if empty, agent needs to know its alias
+      // via the you_are field in the inbox message
 
       log.info(LOG.INJECT, `Injecting synthetic broadcast`, {
         sessionId,
