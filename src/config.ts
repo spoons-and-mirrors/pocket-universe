@@ -145,6 +145,24 @@ function loadConfig(): PocketUniverseConfig {
   }
 
   configLoaded = true;
+
+  // Log loaded config values for debugging (only when logging is enabled)
+  // This runs after configLoaded=true so isLoggingEnabled() works
+  if (loadedConfig.logging) {
+    // Defer import to avoid circular dependency
+    import("./logger").then(({ log, LOG }) => {
+      log.info(LOG.HOOK, `Config loaded`, {
+        path: activeConfigPath,
+        worktree: loadedConfig.worktree,
+        subagent: loadedConfig.subagent,
+        recall: loadedConfig.recall,
+        logging: loadedConfig.logging,
+        subagent_result_forced_attention:
+          loadedConfig.subagent_result_forced_attention,
+      });
+    });
+  }
+
   return loadedConfig;
 }
 
