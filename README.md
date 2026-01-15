@@ -1,14 +1,12 @@
 # Pocket Universe
 
-### Parallel agent orchestration for OpenCode
+## Async agents within a main thread block
 
-## Why Pocket Universe?
-
-Parallel subagents are powerful but notoriously unreliable. Work gets orphaned. Tokens get wasted. Agents finish but nobody reads their output. The classic "fire-and-forget" problem — you fire, and it actually forgets.
+Async agents are powerful but can lead to work getting orphaned and a bunch of your time and tokens... wasted. You fire, it forgets. Orchestration of such workflow is at best finick
 
 **Pocket Universe fixes this.**
 
-- **Fire-and-forget that doesn't forget** — Spawned agents run in parallel, but their output is always piped back to the caller
+- **Fire-and-forget with callback** — Spawned agents run in parallel, but their output is always piped back to the caller
 - **No wasted tokens** — Every model output is captured and delivered, guaranteed
 - **Automatic resumption** — Idle agents wake up when messages arrive
 - **Complete orchestration** — Main session waits for ALL work to finish before continuing
