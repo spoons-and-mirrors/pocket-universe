@@ -87,8 +87,9 @@ export async function isChildSession(
 // =============================================================================
 
 /**
- * Create a minimal synthetic tool message to "cover" the Pocket Universe Summary.
- * This helps with providers that have issues with consecutive user messages.
+ * Create a synthetic tool message containing the Pocket Universe Summary.
+ * This is the full summary of all agents and their work, shown to the LLM
+ * but not visible to the user in the TUI.
  */
 export function createSummaryCoverMessage(
   sessionId: string,
@@ -100,6 +101,12 @@ export function createSummaryCoverMessage(
     };
   }>,
 ): AssistantMessage | null {
+  // Generate the full summary
+  const summary = generatePocketUniverseSummary();
+  if (!summary) {
+    return null;
+  }
+
   // Find the last user message to extract info
   const lastUserMsg = [...messages]
     .reverse()
@@ -118,7 +125,7 @@ export function createSummaryCoverMessage(
   }
 
   const now = Date.now();
-  const syntheticId = `pocket-universe-cover-${now}`;
+  const syntheticId = `pu-sum-${now}`; // Keep short to avoid exceeding 40 char limit
 
   return {
     info: {
@@ -142,18 +149,17 @@ export function createSummaryCoverMessage(
     },
     parts: [
       {
-        id: `${syntheticId}-part`,
+        id: `${syntheticId}-p`,
         sessionID: sessionId,
         messageID: syntheticId,
         type: "tool",
-        callID: `${syntheticId}-call`,
+        callID: `${syntheticId}-c`,
         tool: "pocket_universe",
         state: {
           status: "completed",
           input: { synthetic: true },
-          output:
-            "All parallel work completed. See the Pocket Universe Summary above for details.",
-          title: "Pocket Universe",
+          output: summary,
+          title: "Pocket Universe Summary",
           metadata: {},
           time: { start: now, end: now },
         },
@@ -932,8 +938,9 @@ export function generatePocketUniverseSummary(): string | null {
 }
 
 /**
- * Inject the Pocket Universe Summary as a persisted user message into the main session.
- * Uses client.session.prompt() to persist the summary to the database.
+ * Inject the Pocket Universe Summary as a persisted SYNTHETIC user message into the main session.
+ * Uses noReply: true to prevent AI loop, and synthetic: true to hide from TUI.
+ * The message is persisted to the database but not visible to the user.
  */
 export async function injectPocketUniverseSummaryToMain(
   mainSessionId: string,
@@ -959,12 +966,16 @@ export async function injectPocketUniverseSummaryToMain(
   });
 
   try {
-    // Inject as a persisted user message
+    // Inject as a persisted SYNTHETIC user message
+    // - noReply: true prevents the AI loop from starting
+    // - synthetic: true on the text part hides it from TUI
+    // Note: SDK types are incomplete, so we cast the body
     await storedClient.session.prompt({
       path: { id: mainSessionId },
       body: {
-        parts: [{ type: "text", text: summary }],
-      },
+        noReply: true,
+        parts: [{ type: "text", text: summary, synthetic: true }],
+      } as unknown as { parts: Array<{ type: string; text: string }> },
     });
 
     log.info(LOG.SESSION, `Pocket Universe Summary injected successfully`, {

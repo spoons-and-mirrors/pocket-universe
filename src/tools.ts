@@ -108,66 +108,15 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         isFirstCall,
       });
 
-      // First call logic: announce the agent
-      // BUT if reply_to is provided, skip status announcement and treat as normal reply
-      if (isFirstCall && args.reply_to === undefined) {
-        // Mark this session as having announced
-        announcedSessions.add(sessionId);
-
-        // Update status - this is the agent's first announcement
-        setDescription(sessionId, messageContent);
-
-        const knownAgents = getKnownAliases(sessionId);
-
-        log.info(LOG.TOOL, `First broadcast - status announcement`, {
-          alias,
-          status: messageContent.substring(0, 80),
-          discoveredAgents: knownAgents,
-        });
-
-        // Check if any discovered agents are idle and resume them
-        for (const knownAlias of knownAgents) {
-          const knownSessionId = aliasToSession.get(knownAlias);
-          if (knownSessionId) {
-            const knownState = sessionStates.get(knownSessionId);
-            if (knownState?.status === "idle") {
-              log.info(LOG.TOOL, `Resuming idle agent on status announcement`, {
-                announcer: alias,
-                idleAgent: knownAlias,
-              });
-              resumeSessionWithBroadcast(
-                knownSessionId,
-                alias,
-                messageContent,
-              ).catch((e) =>
-                log.error(LOG.TOOL, `Failed to resume on announcement`, {
-                  error: String(e),
-                }),
-              );
-            }
-          }
-        }
-
-        return broadcastResult(alias, knownAgents, parallelAgents, undefined);
-      }
-
-      // If first call but has reply_to, still mark as announced but process as normal reply
-      if (isFirstCall) {
-        announcedSessions.add(sessionId);
-        log.info(
-          LOG.TOOL,
-          `First broadcast with reply_to - treating as normal reply`,
-          {
-            alias,
-            reply_to: args.reply_to,
-          },
-        );
-      }
-
       // Handle reply_to - mark message as handled and auto-wire recipient
       let handledMessage: HandledMessage | undefined;
       let autoRecipient: string | undefined;
       if (args.reply_to !== undefined) {
+        // Mark as announced if first call (even if replying)
+        if (isFirstCall) {
+          announcedSessions.add(sessionId);
+        }
+
         const handled = markMessagesAsHandled(sessionId, [args.reply_to]);
         if (handled.length > 0) {
           handledMessage = handled[0];
@@ -198,8 +147,8 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         targetAliases = [autoRecipient];
       } else if (!args.send_to) {
         // No target specified - broadcast to all = STATUS UPDATE ONLY
-        // Update this agent's status and return early (no messages queued)
-        // NOTE: Does NOT resume idle agents - status updates are passive visibility
+        // Mark as announced and update status
+        announcedSessions.add(sessionId);
         setDescription(sessionId, messageContent);
 
         log.info(LOG.TOOL, `Broadcast to all - status update only`, {

@@ -209,7 +209,7 @@ const plugin: Plugin = async (ctx) => {
           // Check if parent is a main session (has no grandparent)
           const grandparentId = await getParentId(client, parentId);
           if (!grandparentId) {
-            // Parent is main session - inject the summary
+            // Parent is main session - inject the synthetic summary
             log.info(
               LOG.SESSION,
               `First-level child completing, injecting Pocket Universe Summary to main`,
@@ -545,11 +545,14 @@ Do NOT modify files outside this worktree.
 
       // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
-        // Main sessions receive a persisted Pocket Universe Summary when all work completes
+        // Main sessions receive a persisted SYNTHETIC Pocket Universe Summary when all work completes
         // (injected via injectPocketUniverseSummaryToMain in session.before_complete)
         //
-        // We inject a minimal synthetic tool call here to "cover" the persisted user message
-        // This helps with some providers that have issues with consecutive user messages
+        // We ALSO inject an ephemeral synthetic tool call here as a "cover" message.
+        // This is kept for compatibility with some providers that have issues with
+        // consecutive user messages or need a tool result before the next user message.
+        // The cover message is ephemeral (not persisted) but provides visual feedback
+        // and ensures proper message ordering for all providers.
         if (summaryInjectedSessions.has(sessionId)) {
           const coverMsg = createSummaryCoverMessage(
             sessionId,
