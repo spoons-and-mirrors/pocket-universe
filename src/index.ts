@@ -23,6 +23,7 @@ import {
   callerPendingSubagents,
   mainSessionActiveChildren,
   completedFirstLevelChildren,
+  pendingSubagentOutputs,
   setStoredClient,
   getAlias,
   setDescription,
@@ -166,7 +167,41 @@ const plugin: Plugin = async (ctx) => {
           continue;
         }
 
-        // 2. Check for unread messages (may have been piped from completed spawns)
+        // 2. Check for pending subagent outputs (no forced attention mode)
+        // These are stored by resumeWithSubagentOutput() when subagents complete
+        const pendingOutput = pendingSubagentOutputs.get(input.sessionID);
+        if (pendingOutput) {
+          // Remove from pending to avoid infinite loop
+          pendingSubagentOutputs.delete(input.sessionID);
+
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: has pending subagent output, setting resumePrompt`,
+            {
+              sessionID: input.sessionID,
+              alias,
+              senderAlias: pendingOutput.senderAlias,
+              outputLength: pendingOutput.output.length,
+            },
+          );
+
+          // Set resumePrompt - OpenCode will resume with this as a user message
+          output.resumePrompt = pendingOutput.output;
+
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: resumePrompt set for subagent output, breaking loop`,
+            {
+              sessionID: input.sessionID,
+              alias,
+            },
+          );
+
+          // Break out - OpenCode will handle the resume and call this hook again
+          break;
+        }
+
+        // 3. Check for unread messages (may have been piped from completed spawns)
         const unreadMessages = getMessagesNeedingResume(input.sessionID);
         if (unreadMessages.length > 0) {
           log.info(

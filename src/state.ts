@@ -230,6 +230,15 @@ export const completedFirstLevelChildren = new Map<string, Set<string>>();
 // After cleanup, hooks may still fire for these sessions - we must ignore them
 export const cleanedUpSessions = new Set<string>();
 
+// Pending subagent outputs for the "no forced attention" code path
+// When subagent completes and we want to inject as user message, we store here
+// session.before_complete picks this up and sets resumePrompt
+// Key: recipient session ID, Value: { senderAlias, output }
+export const pendingSubagentOutputs = new Map<
+  string,
+  { senderAlias: string; output: string }
+>();
+
 // ============================================================================
 // Worktree Tracking (isolated working directories per agent)
 // ============================================================================
@@ -512,6 +521,7 @@ export function cleanupCompletedAgents(): void {
   callerPendingSubagents.clear();
   mainSessionActiveChildren.clear();
   completedFirstLevelChildren.clear();
+  pendingSubagentOutputs.clear();
   // Note: We do NOT clear cleanedUpSessions here - it tracks sessions across cleanups
   pendingTaskDescriptions.clear();
 

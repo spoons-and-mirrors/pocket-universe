@@ -17,6 +17,7 @@ import {
   getInbox,
   MAX_INBOX_SIZE,
   getWorktree,
+  pendingSubagentOutputs,
 } from "./state";
 import { isWorktreeEnabled } from "./config";
 
@@ -187,26 +188,21 @@ export async function resumeSessionWithBroadcast(
 }
 
 /**
- * Resume session with subagent output as a persisted user message.
- * Used when subagent_result_forced_attention is enabled.
- * The subagent output is included directly in the user message, persisting to DB.
+ * Store subagent output for the caller to pick up via session.before_complete.
+ * This is used when subagent_result_forced_attention is false.
+ * Instead of calling session.prompt() directly (which deadlocks), we store
+ * the output and let session.before_complete set resumePrompt.
  */
 export async function resumeWithSubagentOutput(
   recipientSessionId: string,
   senderAlias: string,
   subagentOutput: string,
 ): Promise<boolean> {
-  const storedClient = getStoredClient();
-  if (!storedClient) {
-    log.warn(LOG.MESSAGE, `Cannot resume session - no client available`);
-    return false;
-  }
-
   const recipientAlias = sessionToAlias.get(recipientSessionId) || "unknown";
 
   log.info(
     LOG.MESSAGE,
-    `Resuming session with subagent output (forced attention)`,
+    `Storing subagent output for resume (no forced attention)`,
     {
       recipientSessionId,
       recipientAlias,
@@ -215,96 +211,26 @@ export async function resumeWithSubagentOutput(
     },
   );
 
-  try {
-    // Format the resume prompt with the full subagent output embedded
-    // This persists to DB as a user message
-    const resumePrompt = `[Received subagent results: resuming session...]
+  // Format the output message
+  const formattedOutput = `[Subagent ${senderAlias} completed]
 
 <agent_output from="${senderAlias}">
 ${subagentOutput}
 </agent_output>`;
 
-    // Mark session as active before resuming
-    const state = sessionStates.get(recipientSessionId);
-    if (state) {
-      state.status = "active";
-      state.lastActivity = Date.now();
-    }
+  // Store for session.before_complete to pick up
+  pendingSubagentOutputs.set(recipientSessionId, {
+    senderAlias,
+    output: formattedOutput,
+  });
 
-    log.info(LOG.MESSAGE, `Sending subagent output as user message`, {
-      recipientSessionId,
-      recipientAlias,
-      promptLength: resumePrompt.length,
-    });
+  log.info(LOG.MESSAGE, `Subagent output stored for pending resume`, {
+    recipientSessionId,
+    recipientAlias,
+    senderAlias,
+  });
 
-    // Fire off the resume in the background
-    (async () => {
-      try {
-        await storedClient!.session.prompt({
-          path: { id: recipientSessionId },
-          body: {
-            parts: [{ type: "text", text: resumePrompt }],
-          },
-        });
-
-        // Mark session as idle after prompt completes
-        const stateAfter = sessionStates.get(recipientSessionId);
-        if (stateAfter) {
-          stateAfter.status = "idle";
-          stateAfter.lastActivity = Date.now();
-        }
-
-        log.info(
-          LOG.MESSAGE,
-          `Session resumed with subagent output, marked idle`,
-          {
-            recipientSessionId,
-            recipientAlias,
-          },
-        );
-
-        // Check for messages that need resumption
-        const unreadMessages = getMessagesNeedingResume(recipientSessionId);
-        if (unreadMessages.length > 0) {
-          log.info(
-            LOG.MESSAGE,
-            `Resumed session has unread messages, resuming again`,
-            {
-              recipientSessionId,
-              recipientAlias,
-              unreadCount: unreadMessages.length,
-            },
-          );
-
-          const firstUnread = unreadMessages[0];
-          markMessagesAsPresented(recipientSessionId, [firstUnread.msgIndex]);
-
-          await resumeSessionWithBroadcast(
-            recipientSessionId,
-            firstUnread.from,
-            firstUnread.body,
-          );
-        }
-      } catch (e) {
-        log.error(LOG.MESSAGE, `Resumed session with subagent output failed`, {
-          recipientSessionId,
-          error: String(e),
-        });
-        const stateErr = sessionStates.get(recipientSessionId);
-        if (stateErr) {
-          stateErr.status = "idle";
-        }
-      }
-    })();
-
-    return true;
-  } catch (e) {
-    log.error(LOG.MESSAGE, `Failed to resume session with subagent output`, {
-      recipientSessionId,
-      error: String(e),
-    });
-    return false;
-  }
+  return true;
 }
 
 export function getUnhandledMessages(sessionId: string): Message[] {
