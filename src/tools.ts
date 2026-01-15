@@ -52,6 +52,89 @@ import { createAgentWorktree, removeAgentWorktree } from "./worktree";
 import { isWorktreeEnabled, isSpawnResultForcedAttention } from "./config";
 
 // ============================================================================
+// Helper: Get caller's agent and model info from their session messages
+// ============================================================================
+
+interface CallerModelInfo {
+  agent?: string;
+  model?: { modelID?: string; providerID?: string };
+}
+
+/**
+ * Get the caller's agent and model info from their latest assistant message.
+ * This is used to inherit agent/model when spawning new sessions.
+ */
+async function getCallerModelInfo(
+  client: OpenCodeSessionClient,
+  sessionId: string,
+): Promise<CallerModelInfo> {
+  try {
+    const messagesResult = await client.session.messages({
+      path: { id: sessionId },
+    });
+
+    const messages = messagesResult.data;
+    if (!messages || messages.length === 0) {
+      log.debug(LOG.TOOL, `No messages found for session`, { sessionId });
+      return {};
+    }
+
+    // Find the latest assistant message (has agent/model info)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.info.role === "assistant") {
+        const info: CallerModelInfo = {};
+
+        // Type assertion to access agent/model fields not in minimal interface
+        const msgInfo = msg.info as {
+          id: string;
+          role: string;
+          sessionID: string;
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
+          modelID?: string;
+          providerID?: string;
+        };
+
+        if (msgInfo.agent) {
+          info.agent = msgInfo.agent;
+        }
+
+        if (msgInfo.model) {
+          info.model = msgInfo.model;
+        } else if (msgInfo.modelID || msgInfo.providerID) {
+          // Fallback to top-level modelID/providerID
+          info.model = {
+            modelID: msgInfo.modelID,
+            providerID: msgInfo.providerID,
+          };
+        }
+
+        log.debug(LOG.TOOL, `Found caller model info`, {
+          sessionId,
+          agent: info.agent,
+          modelID: info.model?.modelID,
+          providerID: info.model?.providerID,
+        });
+
+        return info;
+      }
+    }
+
+    log.debug(LOG.TOOL, `No assistant message found for session`, {
+      sessionId,
+    });
+    return {};
+  } catch (e) {
+    log.warn(LOG.TOOL, `Failed to get caller model info`, {
+      sessionId,
+      error: String(e),
+    });
+    return {};
+  }
+}
+
+// ============================================================================
 // Broadcast Tool
 // ============================================================================
 
@@ -434,12 +517,24 @@ export function createSpawnTool(client: OpenCodeSessionClient) {
           newSessionId,
         });
 
+        // Get caller's agent/model to inherit
+        const callerModelInfo = await getCallerModelInfo(client, sessionId);
+
+        log.info(LOG.TOOL, `spawn inheriting caller's agent/model`, {
+          callerAlias,
+          agent: callerModelInfo.agent,
+          modelID: callerModelInfo.model?.modelID,
+          providerID: callerModelInfo.model?.providerID,
+        });
+
         // Fire and forget - don't await the prompt
         client.session
           .prompt({
             path: { id: newSessionId },
             body: {
               parts: [{ type: "text", text: args.prompt }],
+              agent: callerModelInfo.agent,
+              model: callerModelInfo.model,
             },
           })
           .then(async (result) => {
