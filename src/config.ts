@@ -96,15 +96,9 @@ function ensureGlobalConfigExists(): void {
 
     // Write default config
     fs.writeFileSync(GLOBAL_CONFIG_PATH, getConfigTemplate());
-    console.error(
-      `[Pocket Universe] Created default config at ${GLOBAL_CONFIG_PATH}`,
-    );
-  } catch (e) {
+    // Silently create - no logging to console
+  } catch {
     // Silently fail if we can't create the config
-    console.error(
-      `[Pocket Universe] Failed to create config at ${GLOBAL_CONFIG_PATH}:`,
-      e,
-    );
   }
 }
 
@@ -141,19 +135,9 @@ function loadConfig(): PocketUniverseConfig {
       ...DEFAULT_CONFIG,
       ...parsed,
     };
-
-    // Log that config was loaded (to stderr since logging might not be enabled yet)
-    if (loadedConfig.logging) {
-      console.error(
-        `[Pocket Universe] Config loaded from ${configPath}:`,
-        loadedConfig,
-      );
-    }
-  } catch (e) {
-    console.error(
-      `[Pocket Universe] Failed to load config from ${configPath}:`,
-      e,
-    );
+    // Config loaded silently - no console output
+  } catch {
+    // Silently fall back to defaults on parse error
     loadedConfig = { ...DEFAULT_CONFIG };
   }
 

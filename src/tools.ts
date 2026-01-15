@@ -114,7 +114,8 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         // Mark this session as having announced
         announcedSessions.add(sessionId);
 
-        // Note: setDescription is called below for ALL broadcast-to-all calls, not just first
+        // Update status - this is the agent's first announcement
+        setDescription(sessionId, messageContent);
 
         const knownAgents = getKnownAliases(sessionId);
 
