@@ -302,9 +302,9 @@ Do NOT modify files outside this worktree.
 
 When agents see each other via broadcast, worktree paths are included so they know where each agent is working.
 
-### Main Session Worktree Summary
+### Worktree Paths in Summary
 
-The main session receives a summary showing all active agent worktrees, their tasks, and their paths.
+The main session’s Pocket Universe Summary includes each agent’s worktree path when worktrees are enabled.
 
 ### Worktree Lifecycle
 
@@ -362,7 +362,7 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 | `worktree`                         | `false` | Create isolated git worktrees for each agent                                                          |
 | `subagent`                         | `true`  | Enable the `subagent` tool for creating sibling agents                                                |
 | `recall`                           | `true`  | Enable the `recall` tool for querying agent history                                                   |
-| `logging`                          | `false` | Write debug logs to `~/.config/opencode/plugin/iam/pocket-universe.log`                               |
+| `logging`                          | `false` | Write debug logs to `.logs/pocket-universe.log` in the current working directory                      |
 | `subagent_result_forced_attention` | `true`  | When true, subagent output appears in broadcast inbox; when false, injected as persisted user message |
 
 ### Behavior When Disabled
@@ -399,7 +399,7 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 
 - Subagent output is injected as a persisted user message
 - Forces immediate LLM attention and persists to database
-- Resume prompt shows: `[Received subagent results: resuming session...]`
+- Resume prompt is set to the full formatted subagent output
 - Not replyable (it's a user message, not a broadcast)
 
 </details>
