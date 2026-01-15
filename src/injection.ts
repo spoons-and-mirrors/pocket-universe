@@ -82,19 +82,103 @@ export async function isChildSession(
   return false;
 }
 
-// ============================================================================
-// Helper to create bundled assistant message with inbox
-// ============================================================================
+// =============================================================================
+// Main Session Cover Message
+// =============================================================================
 
+/**
+ * Create a minimal synthetic tool message to "cover" the Pocket Universe Summary.
+ * This helps with providers that have issues with consecutive user messages.
+ */
+export function createSummaryCoverMessage(
+  sessionId: string,
+  messages: Array<{
+    info?: {
+      id?: string;
+      model?: { modelID?: string; providerID?: string };
+      agent?: string;
+    };
+  }>,
+): AssistantMessage | null {
+  // Find the last user message to extract info
+  const lastUserMsg = [...messages]
+    .reverse()
+    .find((m) => (m as { info?: { role?: string } }).info?.role === "user") as
+    | {
+        info: {
+          id: string;
+          model?: { modelID?: string; providerID?: string };
+          agent?: string;
+        };
+      }
+    | undefined;
+
+  if (!lastUserMsg?.info) {
+    return null;
+  }
+
+  const now = Date.now();
+  const syntheticId = `pocket-universe-cover-${now}`;
+
+  return {
+    info: {
+      id: syntheticId,
+      sessionID: sessionId,
+      role: "assistant",
+      agent: lastUserMsg.info.agent || "code",
+      parentID: lastUserMsg.info.id,
+      modelID: lastUserMsg.info.model?.modelID || DEFAULT_MODEL_ID,
+      providerID: lastUserMsg.info.model?.providerID || DEFAULT_PROVIDER_ID,
+      mode: "default",
+      path: { cwd: "/", root: "/" },
+      time: { created: now, completed: now },
+      cost: 0,
+      tokens: {
+        input: 0,
+        output: 0,
+        reasoning: 0,
+        cache: { read: 0, write: 0 },
+      },
+    },
+    parts: [
+      {
+        id: `${syntheticId}-part`,
+        sessionID: sessionId,
+        messageID: syntheticId,
+        type: "tool",
+        callID: `${syntheticId}-call`,
+        tool: "pocket_universe",
+        state: {
+          status: "completed",
+          input: { synthetic: true },
+          output:
+            "All parallel work completed. See the Pocket Universe Summary above for details.",
+          title: "Pocket Universe",
+          metadata: {},
+          time: { start: now, end: now },
+        },
+      },
+    ],
+  };
+}
+
+// =============================================================================
+// Inbox Message Creation (for child sessions)
+// =============================================================================
+
+/**
+ * Create a synthetic broadcast message showing inbox and agent status.
+ * This is injected into child sessions before each LLM call.
+ */
 export function createInboxMessage(
   sessionId: string,
   messages: Message[],
-  baseUserMessage: UserMessage,
+  lastUserMessage: UserMessage,
   parallelAgents: ParallelAgent[],
   hasAnnounced: boolean,
 ): AssistantMessage {
   const now = Date.now();
-  const userInfo = baseUserMessage.info;
+  const userInfo = lastUserMessage.info;
 
   // Build structured output - this is what the LLM sees as the "tool result"
   // Agents section shows available agents and their status history (not replyable)
@@ -105,10 +189,10 @@ export function createInboxMessage(
     messages?: Array<{ id: number; from: string; content: string }>;
   } = {};
 
-  // Add hint for unannounced agents
+  // Add hint for first-time callers
   if (!hasAnnounced) {
     outputData.hint =
-      'ACTION REQUIRED: Announce yourself to other agents by calling broadcast(message="what you\'re working on")';
+      "Call broadcast(message='what you are working on') to announce yourself first.";
   }
 
   // Build agents section from parallelAgents (status comes from agentDescriptions)

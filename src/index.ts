@@ -10,6 +10,7 @@ import type {
   MessagesTransformOutput,
   ConfigTransformOutput,
   UserMessage,
+  AssistantMessage,
 } from "./types";
 import {
   sessionToAlias,
@@ -41,7 +42,10 @@ import {
   fetchSpawnOutput,
   markSpawnCompleted,
 } from "./messaging";
-import { injectPocketUniverseSummaryToMain } from "./injection";
+import {
+  injectPocketUniverseSummaryToMain,
+  createSummaryCoverMessage,
+} from "./injection";
 import { createBroadcastTool, createSpawnTool } from "./tools";
 import { createAgentWorktree } from "./worktree";
 import { isSpawnEnabled, isWorktreeEnabled } from "./config";
@@ -541,9 +545,27 @@ Do NOT modify files outside this worktree.
 
       // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
-        // Main sessions don't get ephemeral injections
-        // They receive a persisted Pocket Universe Summary when all work completes
+        // Main sessions receive a persisted Pocket Universe Summary when all work completes
         // (injected via injectPocketUniverseSummaryToMain in session.before_complete)
+        //
+        // We inject a minimal synthetic tool call here to "cover" the persisted user message
+        // This helps with some providers that have issues with consecutive user messages
+        if (summaryInjectedSessions.has(sessionId)) {
+          const coverMsg = createSummaryCoverMessage(
+            sessionId,
+            output.messages,
+          );
+          if (coverMsg) {
+            output.messages.push(coverMsg as unknown as UserMessage);
+            log.info(
+              LOG.INJECT,
+              `Injected cover tool for main session summary`,
+              {
+                sessionId,
+              },
+            );
+          }
+        }
 
         log.debug(
           LOG.INJECT,
