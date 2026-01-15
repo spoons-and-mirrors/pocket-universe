@@ -1,5 +1,5 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { SYSTEM_PROMPT } from "./prompt";
+import { getSystemPrompt } from "./prompt";
 import { log, LOG } from "./logger";
 import type {
   OpenCodeSessionClient,
@@ -42,6 +42,7 @@ import {
 } from "./messaging";
 import { createBroadcastTool, createSpawnTool } from "./tools";
 import { createAgentWorktree } from "./worktree";
+import { isSpawnEnabled, isWorktreeEnabled } from "./config";
 
 // ============================================================================
 // Plugin
@@ -322,7 +323,8 @@ const plugin: Plugin = async (ctx) => {
 
     tool: {
       broadcast: createBroadcastTool(client),
-      spawn: createSpawnTool(client),
+      // Only register spawn tool if enabled in config
+      ...(isSpawnEnabled() ? { spawn: createSpawnTool(client) } : {}),
     },
 
     // Capture task description before execution
@@ -388,10 +390,10 @@ const plugin: Plugin = async (ctx) => {
       // Register child session early - before agent even calls broadcast
       registerSession(sessionId);
 
-      // Create worktree if not already created (for native task children)
+      // Create worktree if enabled and not already created (for native task children)
       // Spawned children already have worktrees created in spawn tool
       let agentWorktree = getWorktree(sessionId);
-      if (!agentWorktree) {
+      if (isWorktreeEnabled() && !agentWorktree) {
         const alias = getAlias(sessionId);
         const newWorktree = await createAgentWorktree(alias, process.cwd());
         if (newWorktree) {
@@ -427,19 +429,21 @@ const plugin: Plugin = async (ctx) => {
         }
       }
 
-      // Inject Pocket Universe instructions
-      output.system.push(SYSTEM_PROMPT);
+      // Inject Pocket Universe instructions (dynamically generated based on config)
+      output.system.push(getSystemPrompt());
 
-      // Inject agent's own worktree path if available
-      const worktreePath = getWorktree(sessionId);
-      if (worktreePath) {
-        output.system.push(`
+      // Inject agent's own worktree path if worktree feature is enabled
+      if (isWorktreeEnabled()) {
+        const worktreePath = getWorktree(sessionId);
+        if (worktreePath) {
+          output.system.push(`
 <worktree>
 Your isolated working directory: ${worktreePath}
 ALL file operations (read, write, edit, bash) should use paths within this directory.
 Do NOT modify files outside this worktree.
 </worktree>
 `);
+        }
       }
 
       log.info(
@@ -448,7 +452,9 @@ Do NOT modify files outside this worktree.
         {
           sessionId,
           alias: getAlias(sessionId),
-          worktree: worktreePath || "none",
+          worktree: isWorktreeEnabled()
+            ? getWorktree(sessionId) || "none"
+            : "disabled",
         },
       );
     },
@@ -502,16 +508,18 @@ Do NOT modify files outside this worktree.
 
       // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
-        // For main sessions, inject worktree summary if there are active worktrees
-        const worktreeSummary = createWorktreeSummaryMessage(
-          sessionId,
-          lastUserMsg,
-        );
-        if (worktreeSummary) {
-          output.messages.push(worktreeSummary as unknown as UserMessage);
-          log.info(LOG.INJECT, `Injected worktree summary for main session`, {
+        // For main sessions, inject worktree summary if worktree feature is enabled
+        if (isWorktreeEnabled()) {
+          const worktreeSummary = createWorktreeSummaryMessage(
             sessionId,
-          });
+            lastUserMsg,
+          );
+          if (worktreeSummary) {
+            output.messages.push(worktreeSummary as unknown as UserMessage);
+            log.info(LOG.INJECT, `Injected worktree summary for main session`, {
+              sessionId,
+            });
+          }
         }
 
         log.debug(
@@ -520,7 +528,6 @@ Do NOT modify files outside this worktree.
           {
             sessionId,
             injectedSpawns: uninjectedSpawns.length,
-            hasWorktreeSummary: !!worktreeSummary,
           },
         );
         return;

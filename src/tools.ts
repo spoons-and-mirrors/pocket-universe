@@ -48,6 +48,7 @@ import {
 } from "./messaging";
 import type { InternalClient } from "./types";
 import { createAgentWorktree, removeAgentWorktree } from "./worktree";
+import { isWorktreeEnabled } from "./config";
 
 // ============================================================================
 // Broadcast Tool
@@ -398,10 +399,15 @@ export function createSpawnTool(client: OpenCodeSessionClient) {
         registerSession(newSessionId);
         const newAlias = getAlias(newSessionId);
 
-        // Create isolated worktree for this agent (if in a git repo)
-        const worktreePath = await createAgentWorktree(newAlias, process.cwd());
-        if (worktreePath) {
-          setWorktree(newSessionId, worktreePath);
+        // Create isolated worktree for this agent (if enabled and in a git repo)
+        if (isWorktreeEnabled()) {
+          const worktreePath = await createAgentWorktree(
+            newAlias,
+            process.cwd(),
+          );
+          if (worktreePath) {
+            setWorktree(newSessionId, worktreePath);
+          }
         }
 
         log.info(LOG.TOOL, `spawn created session`, {

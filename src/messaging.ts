@@ -18,6 +18,7 @@ import {
   MAX_INBOX_SIZE,
   getWorktree,
 } from "./state";
+import { isWorktreeEnabled } from "./config";
 
 // Re-export injection functions for backwards compatibility
 export {
@@ -268,7 +269,8 @@ export function getParallelAgents(sessionId: string): ParallelAgent[] {
       agents.push({
         alias,
         description: getDescription(alias),
-        worktree: getWorktree(sessId),
+        // Only include worktree if feature is enabled
+        worktree: isWorktreeEnabled() ? getWorktree(sessId) : undefined,
       });
     }
   }

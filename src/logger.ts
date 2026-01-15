@@ -1,13 +1,11 @@
 import * as fs from "fs";
 import * as path from "path";
+import { isLoggingEnabled } from "./config";
 
 // =============================================================================
 // Simple file logger for debugging the Pocket Universe plugin
-// Only active when OPENCODE_POCKET_UNIVERSE_DEBUG_LOGS=1 is set in the environment
+// Only active when logging is enabled in ~/.config/opencode/pocket-universe.jsonc
 // =============================================================================
-
-// Check if debug logging is enabled
-const DEBUG_ENABLED = process.env.OPENCODE_POCKET_UNIVERSE_DEBUG_LOGS === "1";
 
 // Constants
 const LOG_DIR = path.join(process.cwd(), ".logs");
@@ -17,17 +15,31 @@ const WRITE_INTERVAL_MS = 100; // Batch writes every 100ms
 // Async log buffer
 let logBuffer: string[] = [];
 let writeScheduled = false;
+let initialized = false;
 
-// Only initialize log directory if debug is enabled
-if (DEBUG_ENABLED) {
+/**
+ * Initialize the log directory (deferred until first write)
+ */
+function ensureInitialized(): boolean {
+  if (initialized) {
+    return true;
+  }
+
+  if (!isLoggingEnabled()) {
+    return false;
+  }
+
   try {
     if (!fs.existsSync(LOG_DIR)) {
       fs.mkdirSync(LOG_DIR, { recursive: true });
     }
     // Clear log file on each restart
     fs.writeFileSync(LOG_FILE, "");
+    initialized = true;
+    return true;
   } catch {
     // Ignore errors during init
+    return false;
   }
 }
 
@@ -73,8 +85,8 @@ function writeLog(
   message: string,
   data?: unknown,
 ): void {
-  // Skip all logging if debug is not enabled
-  if (!DEBUG_ENABLED) {
+  // Skip all logging if not enabled or can't initialize
+  if (!ensureInitialized()) {
     return;
   }
 

@@ -108,46 +108,99 @@ export const SPAWN_MISSING_PROMPT = `Error: 'prompt' parameter is required.`;
 // System prompt injection
 // =============================================================================
 
-export const SYSTEM_PROMPT = `
-<instructions tool="pocket-universe">
+import { isWorktreeEnabled, isSpawnEnabled } from "./config";
+
+/**
+ * Get the system prompt, dynamically including sections based on config.
+ */
+export function getSystemPrompt(): string {
+  const sections: string[] = [];
+
+  // Header
+  sections.push(`<instructions tool="pocket-universe">
 # Pocket Universe — Parallel Agent Orchestration
 
-Use \`broadcast\` to communicate with other parallel agents.
-Use \`spawn\` to create new sibling agents for parallel work.
+Use \`broadcast\` to communicate with other parallel agents.`);
 
+  // Spawn intro (if enabled)
+  if (isSpawnEnabled()) {
+    sections.push(
+      `Use \`spawn\` to create new sibling agents for parallel work.`,
+    );
+  }
+
+  // Announce section
+  sections.push(`
 ## IMPORTANT: Announce Yourself First
-Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.
+Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.`);
 
+  // Worktree section (only if enabled)
+  if (isWorktreeEnabled()) {
+    sections.push(`
 ## Isolated Worktrees
 Each agent operates in its own isolated git worktree - a clean checkout from the last commit.
 - Your worktree path is shown in your system prompt (if available)
 - **ALL file operations should use paths relative to or within your worktree**
 - Do NOT modify files outside your assigned worktree
-- Other agents have their own worktrees - coordinate via broadcast, don't touch their files
+- Other agents have their own worktrees - coordinate via broadcast, don't touch their files`);
+  }
 
+  // Messaging section
+  sections.push(`
 ## Sending Messages
 - \`broadcast(message="...")\` → announce yourself or send to all agents
 - \`broadcast(send_to="agentB", message="...")\` → send to specific agent
-- \`broadcast(reply_to=1, message="...")\` → reply to message #1
+- \`broadcast(reply_to=1, message="...")\` → reply to message #1`);
 
+  // Spawn section (only if enabled)
+  if (isSpawnEnabled()) {
+    const spawnSection = isWorktreeEnabled()
+      ? `
 ## Spawning Agents
 - \`spawn(prompt="...", description="...")\` → create a sibling agent
 - **Fire-and-forget**: spawn() returns immediately, you continue working
 - **Output piping**: When spawned agent completes, its output arrives as a message
-- Spawned agents get their own isolated worktrees
+- Spawned agents get their own isolated worktrees`
+      : `
+## Spawning Agents
+- \`spawn(prompt="...", description="...")\` → create a sibling agent
+- **Fire-and-forget**: spawn() returns immediately, you continue working
+- **Output piping**: When spawned agent completes, its output arrives as a message`;
+    sections.push(spawnSection);
+  }
 
+  // Receiving messages section
+  const agentExample = isWorktreeEnabled()
+    ? `{ name: "agentA", status: "Working on X", worktree: "/path/to/.worktrees/agentA" }`
+    : `{ name: "agentA", status: "Working on X" }`;
+
+  const agentsDescription = isWorktreeEnabled()
+    ? `- **agents**: Other agents, their status, and their worktree paths`
+    : `- **agents**: Other agents and their current status`;
+
+  sections.push(`
 ## Receiving Messages
 Messages appear as synthetic \`broadcast\` tool results:
 \`\`\`
 {
-  agents: [{ name: "agentA", status: "Working on X", worktree: "/path/to/.worktrees/agentA" }],
+  agents: [${agentExample}],
   messages: [{ id: 1, from: "agentA", content: "..." }]
 }
 \`\`\`
 
-- **agents**: Other agents, their status, and their worktree paths
-- **messages**: Messages to reply to using \`reply_to\`
+${agentsDescription}
+- **messages**: Messages to reply to using \`reply_to\``);
 
-When you receive output from a spawned agent, process it and incorporate the results.
-</instructions>
-`;
+  // Footer
+  if (isSpawnEnabled()) {
+    sections.push(`
+When you receive output from a spawned agent, process it and incorporate the results.`);
+  }
+
+  sections.push(`</instructions>`);
+
+  return sections.join("\n");
+}
+
+// Legacy export for backwards compatibility (but prefer getSystemPrompt())
+export const SYSTEM_PROMPT = getSystemPrompt();

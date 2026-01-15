@@ -23,6 +23,7 @@ import {
   DEFAULT_MODEL_ID,
   DEFAULT_PROVIDER_ID,
 } from "./state";
+import { isWorktreeEnabled } from "./config";
 
 // ============================================================================
 // Session utils
@@ -206,11 +207,17 @@ export function createInboxMessage(
 /**
  * Create a synthetic worktree summary for the main session.
  * Shows all active agent worktrees so main session knows where changes are.
+ * Returns null if worktree feature is disabled.
  */
 export function createWorktreeSummaryMessage(
   sessionId: string,
   baseUserMessage: UserMessage,
 ): AssistantMessage | null {
+  // Return null if worktree feature is disabled
+  if (!isWorktreeEnabled()) {
+    return null;
+  }
+
   // Collect all active worktrees with their agent info
   const worktreeInfo: Array<{
     alias: string;
