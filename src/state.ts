@@ -93,6 +93,10 @@ export const mainSessionActiveChildren = new Map<string, Set<string>>();
 // Key: main session ID, Value: Set of completed child session IDs
 export const completedFirstLevelChildren = new Map<string, Set<string>>();
 
+// Track sessions that have been cleaned up to prevent re-registration
+// After cleanup, hooks may still fire for these sessions - we must ignore them
+export const cleanedUpSessions = new Set<string>();
+
 // ============================================================================
 // Worktree Tracking (isolated working directories per agent)
 // ============================================================================
@@ -286,6 +290,14 @@ export function getInbox(sessionId: string): Message[] {
 }
 
 export function registerSession(sessionId: string): void {
+  // Don't re-register sessions that have been cleaned up
+  if (cleanedUpSessions.has(sessionId)) {
+    log.debug(LOG.SESSION, `Skipping registration for cleaned up session`, {
+      sessionId,
+    });
+    return;
+  }
+
   if (activeSessions.has(sessionId)) {
     return;
   }
@@ -341,7 +353,14 @@ export function cleanupCompletedAgents(): void {
     callerPendingSubagents: callerPendingSubagents.size,
     mainSessionActiveChildren: mainSessionActiveChildren.size,
     completedFirstLevelChildren: completedFirstLevelChildren.size,
+    cleanedUpSessions: cleanedUpSessions.size,
   };
+
+  // Mark all current sessions as cleaned up BEFORE clearing
+  // This prevents them from being re-registered when post-cleanup hooks fire
+  for (const sessionId of activeSessions) {
+    cleanedUpSessions.add(sessionId);
+  }
 
   // Clear all agent-related state
   activeSessions.clear();
@@ -360,6 +379,7 @@ export function cleanupCompletedAgents(): void {
   callerPendingSubagents.clear();
   mainSessionActiveChildren.clear();
   completedFirstLevelChildren.clear();
+  // Note: We do NOT clear cleanedUpSessions here - it tracks sessions across cleanups
   pendingTaskDescriptions.clear();
 
   // Note: We do NOT clear summaryInjectedSessions here

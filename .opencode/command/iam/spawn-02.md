@@ -10,4 +10,4 @@ use a TASK Tool a prompt it with this EXACT prompt:
 
 ---
 
-use a new task tool and prompt it with "please tell me what agents are available right now, and what is your agent name?"
+use a new task tool and prompt it with "DO NOT USE THE BROADCAST TOOL. FIRST, YOU MUST READ A RANDOM FILE, THEN PLEASE TELL ME A FEW THINGS YOU LEARNED ABOUT THAT FILE. THEN please tell me what agents are available right now, and what is your agent name? DO NOT USE BROADCAST, DO NOT USE PARALLEL TOOLS, DO THIS SEQUENTIALLY."
