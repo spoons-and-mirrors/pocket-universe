@@ -6,6 +6,18 @@
 // Internal Types
 // ============================================================================
 
+export interface ParallelAgent {
+  alias: string;
+  description?: string[]; // Status history (most recent last)
+  worktree?: string; // Isolated working directory path
+}
+
+export interface HandledMessage {
+  id: number;
+  from: string;
+  body: string;
+}
+
 export interface Message {
   id: string; // Internal ID (random string)
   msgIndex: number; // Numeric index for display (1-based, per session)

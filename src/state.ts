@@ -11,7 +11,10 @@ import type {
   OpenCodeSessionClient,
 } from "./types";
 import { log, LOG } from "./logger";
-import { RECALL_AGENT_ACTIVE, RECALL_AGENT_IDLE_NO_OUTPUT } from "./prompt";
+import {
+  RECALL_AGENT_ACTIVE,
+  RECALL_AGENT_IDLE_NO_OUTPUT,
+} from "./prompts/recall.prompts";
 
 // ============================================================================
 // Constants

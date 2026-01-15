@@ -1,78 +1,17 @@
 // =============================================================================
-// Core messaging functions
+// Resume and output piping functions
 // =============================================================================
 
-import type { Message } from "./types";
-import type { ParallelAgent, HandledMessage } from "./prompt";
-import { resumeBroadcastPrompt, formatSubagentOutput } from "./prompt";
-import { log, LOG } from "./logger";
+import { resumeBroadcastPrompt } from "../prompts/broadcast.prompts";
+import { formatSubagentOutput } from "../prompts/subagent.prompts";
+import { log, LOG } from "../logger";
 import {
   sessionToAlias,
-  aliasToSession,
-  presentedMessages,
   sessionStates,
   getStoredClient,
-  getDescription,
-  generateId,
-  getNextMsgIndex,
-  getInbox,
-  MAX_INBOX_SIZE,
-  getWorktree,
   pendingSubagentOutputs,
-} from "./state";
-import { isWorktreeEnabled } from "./config";
-
-// Re-export injection functions for backwards compatibility
-export {
-  getParentId,
-  isChildSession,
-  createInboxMessage,
-  createSubagentTaskMessage,
-  createWorktreeSummaryMessage,
-  injectTaskPartToParent,
-  fetchSubagentOutput,
-  markSubagentCompleted,
-} from "./injection";
-
-// ============================================================================
-// Core messaging functions
-// ============================================================================
-
-export function sendMessage(from: string, to: string, body: string): Message {
-  const message: Message = {
-    id: generateId(),
-    msgIndex: getNextMsgIndex(to),
-    from,
-    to,
-    body,
-    timestamp: Date.now(),
-    handled: false,
-  };
-
-  const queue = getInbox(to);
-
-  // Enforce max queue size
-  if (queue.length >= MAX_INBOX_SIZE) {
-    // Remove oldest handled message, or oldest message if all unhandled
-    const handledIndex = queue.findIndex((m) => m.handled);
-    if (handledIndex !== -1) {
-      queue.splice(handledIndex, 1);
-    } else {
-      queue.shift();
-    }
-    log.warn(LOG.MESSAGE, `Queue full, removed oldest message`, { to });
-  }
-
-  queue.push(message);
-  log.info(LOG.MESSAGE, `Message sent`, {
-    id: message.id,
-    msgIndex: message.msgIndex,
-    from,
-    to,
-    bodyLength: body.length,
-  });
-  return message;
-}
+} from "../state";
+import { getMessagesNeedingResume, markMessagesAsPresented } from "./core";
 
 /**
  * Resume an idle session by sending a broadcast message as a user prompt.
@@ -120,7 +59,7 @@ export async function resumeSessionWithBroadcast(
     // This is wrapped in an IIFE so we don't block the caller
     (async () => {
       try {
-        await storedClient!.session.prompt({
+        await storedClient.session.prompt({
           path: { id: recipientSessionId },
           body: {
             parts: [{ type: "text", text: resumePrompt }],
@@ -267,95 +206,4 @@ export async function resumeWithSubagentOutput(
   });
 
   return true;
-}
-
-export function getUnhandledMessages(sessionId: string): Message[] {
-  return getInbox(sessionId).filter((m) => !m.handled);
-}
-
-/**
- * Get messages that need resumption: unhandled AND not presented via transform.
- * - Unhandled: agent didn't use reply_to to respond
- * - Not presented: agent didn't see the message in their context (via transform injection)
- * Only these messages should trigger a resume - they're truly "unseen" by the agent.
- */
-export function getMessagesNeedingResume(sessionId: string): Message[] {
-  const unhandled = getUnhandledMessages(sessionId);
-  const presented = presentedMessages.get(sessionId);
-  if (!presented || presented.size === 0) {
-    return unhandled; // No messages were presented, all unhandled need resume
-  }
-  // Filter out messages that were already presented to the agent
-  return unhandled.filter((m) => !presented.has(m.msgIndex));
-}
-
-export function markMessagesAsHandled(
-  sessionId: string,
-  msgIndices: number[],
-): HandledMessage[] {
-  const queue = getInbox(sessionId);
-  const handled: HandledMessage[] = [];
-  for (const msg of queue) {
-    if (msgIndices.includes(msg.msgIndex) && !msg.handled) {
-      msg.handled = true;
-      handled.push({
-        id: msg.msgIndex,
-        from: msg.from,
-        body: msg.body,
-      });
-      log.info(LOG.MESSAGE, `Message marked as handled`, {
-        sessionId,
-        msgIndex: msg.msgIndex,
-        from: msg.from,
-      });
-    }
-  }
-  return handled;
-}
-
-export function markMessagesAsPresented(
-  sessionId: string,
-  msgIndices: number[],
-): void {
-  let presented = presentedMessages.get(sessionId);
-  if (!presented) {
-    presented = new Set();
-    presentedMessages.set(sessionId, presented);
-  }
-  for (const idx of msgIndices) {
-    presented.add(idx);
-  }
-  log.debug(LOG.MESSAGE, `Marked messages as presented (seen by agent)`, {
-    sessionId,
-    indices: msgIndices,
-  });
-}
-
-export function getKnownAliases(sessionId: string): string[] {
-  const selfAlias = sessionToAlias.get(sessionId);
-  const agents: string[] = [];
-  for (const alias of aliasToSession.keys()) {
-    if (alias !== selfAlias) {
-      agents.push(alias);
-    }
-  }
-  return agents;
-}
-
-export function getParallelAgents(sessionId: string): ParallelAgent[] {
-  const selfAlias = sessionToAlias.get(sessionId);
-  const agents: ParallelAgent[] = [];
-  for (const [alias, sessId] of aliasToSession.entries()) {
-    // All registered sessions are child sessions (we check parentID before registering)
-    // Just exclude self
-    if (alias !== selfAlias) {
-      agents.push({
-        alias,
-        description: getDescription(alias),
-        // Only include worktree if feature is enabled
-        worktree: isWorktreeEnabled() ? getWorktree(sessId) : undefined,
-      });
-    }
-  }
-  return agents;
 }
