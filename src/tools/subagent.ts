@@ -311,10 +311,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             // 1. Fetch the output from subagent session
             const subagentOutput = await fetchSubagentOutput(client, newSessionId, newAlias);
 
-            // 1.5. Save to history for recall tool
-            saveAgentToHistory(newAlias, subagentOutput);
-
-            // 2. Mark session as idle in sessionStates (enables resume)
+            // 2. Mark session as idle IMMEDIATELY after capturing output (before any delivery)
             sessionStates.set(newSessionId, {
               sessionId: newSessionId,
               alias: newAlias,
@@ -326,7 +323,10 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
               newAlias,
             });
 
-            // 3. Mark the subagent as completed in the parent TUI
+            // 3. Save to history for recall tool
+            saveAgentToHistory(newAlias, subagentOutput);
+
+            // 4. Mark the subagent as completed in the parent TUI
             const subagent = activeSubagents.get(newSessionId);
             if (subagent) {
               await markSubagentCompleted(client, subagent);
