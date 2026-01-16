@@ -2,20 +2,22 @@
 
 ## An agentic closed loop with async capabilities
 
-Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This plugin extends the native opencode subagent paradigm to provide reliable closed loop async agents, blocking main thread execution, a _"pocket universe"_.
+Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This plugin extends the native opencode subagent paradigm to provide: closed loop, resilient, async agents, blocking main thread execution. A _"pocket universe"_.
 
-### Tools
+This ships with three tools creating a robust system for parallel agents to communicate and coordinate work:
 
-- `broadcast` is the messaging system. Subagents can send or reply to others and update their status
-- `subagent` creates a sibling subagent (async). The caller receives the output mid-stream (or resumes if idle)
+- `broadcast` is the messaging system, subagents can send or reply to others and update own status
+- `subagent` (async) creates a sibling subagent, the caller receives the output mid-stream (or resumes if idle)
 - `recall` allows access to subagents' status history, can also return subagent output
 
 ### Key Features
 
-- **blocking** main session until the _pocket universe_ completes
+- **attention** is all they need, agents are accutely aware each other
 - **resume** idle agents upon receiving a `broadcast` or `subagent` result
+- **block** main session until all subagents in the _pocket universe_ complete
 - **depth** control to limit runaway subagent spawning
-- **worktree** support for isolated agent workspaces (optional)
+- **worktree** support for isolated agent workspaces (disabled by default)
+- **configurable** all tools work as standalone, can be enabled/disabled via config
 
 ---
 
@@ -205,7 +207,8 @@ Messages appear as synthetic `broadcast` tool results:
       "agents": [
         {
           "name": "agentA",
-          "status": ["searching for X", "found X in file.ts"]
+          "status": ["searching for X", "found X in file.ts"],
+          "idle": true
         }
       ],
       "messages": [{ "id": 1, "from": "agentA", "content": "Need help?" }]
@@ -217,6 +220,7 @@ Messages appear as synthetic `broadcast` tool results:
 - **`synthetic: true`** — Injected by Pocket Universe, not a real tool call
 - **`you_are`** — Your agent name (always included so you know your identity)
 - **`agents`** — All sibling agents and their status history (array of status updates)
+- **`idle`** — True if the agent has completed and is no longer active
 - **`messages`** — Inbox messages, reply using `reply_to`
 
 **Reply audit trail:** When you reply using `reply_to`, the tool output includes the FULL original message you're replying to, providing a complete audit trail.
@@ -334,72 +338,64 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 
 ```jsonc
 {
+  // Tool enablement flags
+  "tools": {
+    // Enable the broadcast tool for inter-agent messaging
+    "broadcast": true,
+
+    // Enable the subagent tool for creating sibling agents
+    "subagent": true,
+
+    // Enable the recall tool for querying agent history
+    "recall": true,
+  },
+
+  // Tool configuration parameters
+  "parameters": {
+    // Max session depth allowed to spawn subagents (main session = 0, exclusive)
+    "subagent_max_depth": 3,
+
+    // When true (default), subagent results appear in broadcast inbox.
+    // When false, subagent results are injected as persisted user message.
+    "subagent_result_forced_attention": true,
+
+    // When true (default), recall can access agents from prior pocket universes.
+    // When false, recall only shows current pocket universe agents.
+    "recall_cross_pocket": true,
+  },
+
   // Enable isolated git worktrees for each agent
   // Each agent gets its own clean checkout from HEAD
   "worktree": false,
 
-  // Enable the subagent tool for creating sibling agents
-  // Allows agents to spawn other agents that run in parallel
-  "subagent": true,
-
-  // Enable the recall tool for querying agent history
-  // Allows agents to recall what previous agents accomplished
-  "recall": true,
-
   // Enable debug logging to .logs/pocket-universe.log
   "logging": false,
-
-  // When true (default), subagent results appear in broadcast inbox.
-  // When false, subagent results are injected as persisted user message.
-  "subagent_result_forced_attention": true,
 }
 ```
 
 ### Feature Flags
 
-| Flag                               | Default | Description                                                                                           |
+**`tools`**
+
+| Flag        | Default | Description                                            |
+| ----------- | ------- | ------------------------------------------------------ |
+| `broadcast` | `true`  | Enable the `broadcast` tool for inter-agent messaging  |
+| `subagent`  | `true`  | Enable the `subagent` tool for creating sibling agents |
+| `recall`    | `true`  | Enable the `recall` tool for querying agent history    |
+
+**`parameters`**
+
+| Parameter                          | Default | Description                                                                                           |
 | ---------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `worktree`                         | `false` | Create isolated git worktrees for each agent                                                          |
-| `subagent`                         | `true`  | Enable the `subagent` tool for creating sibling agents                                                |
-| `recall`                           | `true`  | Enable the `recall` tool for querying agent history                                                   |
-| `logging`                          | `false` | Write debug logs to `.logs/pocket-universe.log` in the current working directory                      |
+| `subagent_max_depth`               | `3`     | Max session depth allowed to spawn subagents (main session = 0, exclusive)                            |
 | `subagent_result_forced_attention` | `true`  | When true, subagent output appears in broadcast inbox; when false, injected as persisted user message |
+| `recall_cross_pocket`              | `true`  | When true, recall can access agents from prior pocket universes                                       |
 
-### Behavior When Disabled
+**Top-level**
 
-**`worktree: false`**
-
-- No worktrees are created
-- Worktree sections are hidden from system prompts and broadcasts
-- Agents work in the main repository (potential for conflicts)
-
-**`subagent: false`**
-
-- The `subagent` tool is not registered
-- Agents cannot create new sibling agents
-- Subagent instructions are hidden from the system prompt
-
-**`recall: false`**
-
-- The `recall` tool is not registered
-- Agents cannot query history of previous agents
-
-**`logging: false`**
-
-- No log file is created
-- Reduces disk I/O
-
-**`subagent_result_forced_attention: true`** (default)
-
-- Subagent output appears in the broadcast inbox (synthetic injection)
-- Message is replyable via `reply_to`
-- Not persisted to database (memory only)
-
-**`subagent_result_forced_attention: false`**
-
-- Subagent output is injected as a persisted user message
-- Forces immediate LLM attention and persists to database
-- Resume prompt is set to the full formatted subagent output
-- Not replyable (it's a user message, not a broadcast)
+| Flag       | Default | Description                                     |
+| ---------- | ------- | ----------------------------------------------- |
+| `worktree` | `false` | Create isolated git worktrees for each agent    |
+| `logging`  | `false` | Write debug logs to `.logs/pocket-universe.log` |
 
 </details>
