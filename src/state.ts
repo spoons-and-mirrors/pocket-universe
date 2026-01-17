@@ -258,6 +258,10 @@ export const mainSessionActiveChildren = new Map<string, Set<string>>();
 // Key: main session ID, Value: Set of completed child session IDs
 export const completedFirstLevelChildren = new Map<string, Set<string>>();
 
+// Track coordinator (first child) per main session for /pocket command
+// Key: main session ID, Value: { sessionId, alias } of the first child
+export const mainSessionCoordinator = new Map<string, { sessionId: string; alias: string }>();
+
 // Track sessions that have been cleaned up to prevent re-registration
 // After cleanup, hooks may still fire for these sessions - we must ignore them
 export const cleanedUpSessions = new Set<string>();
@@ -544,6 +548,7 @@ export function cleanupCompletedAgents(): void {
     callerPendingSubagents: callerPendingSubagents.size,
     mainSessionActiveChildren: mainSessionActiveChildren.size,
     completedFirstLevelChildren: completedFirstLevelChildren.size,
+    mainSessionCoordinator: mainSessionCoordinator.size,
     cleanedUpSessions: cleanedUpSessions.size,
   };
 
@@ -571,6 +576,7 @@ export function cleanupCompletedAgents(): void {
   callerPendingSubagents.clear();
   mainSessionActiveChildren.clear();
   completedFirstLevelChildren.clear();
+  mainSessionCoordinator.clear();
   pendingSubagentOutputs.clear();
   // Note: We do NOT clear cleanedUpSessions here - it tracks sessions across cleanups
   pendingTaskDescriptions.clear();

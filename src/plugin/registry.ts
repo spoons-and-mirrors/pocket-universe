@@ -2,6 +2,7 @@ import { log, LOG } from '../logger';
 import type { OpenCodeSessionClient, ConfigTransformOutput } from '../types';
 import { createBroadcastTool, createSubagentTool, createRecallTool } from '../tools/index';
 import { isBroadcastEnabled, isSubagentEnabled, isRecallEnabled } from '../config';
+import { parsePocketCommand, executePocketCommand } from '../commands/index';
 
 export function createRegistry(client: OpenCodeSessionClient) {
   return {
@@ -12,6 +13,42 @@ export function createRegistry(client: OpenCodeSessionClient) {
       ...(isRecallEnabled() ? { recall: createRecallTool() } : {}),
       // Only register subagent tool if enabled in config
       ...(isSubagentEnabled() ? { subagent: createSubagentTool(client) } : {}),
+    },
+
+    // Intercept /pocket command before execution
+    'command.execute.before': async (
+      input: { command: string; sessionID: string; arguments: string },
+      output: { parts: unknown[] },
+    ) => {
+      if (input.command !== 'pocket') {
+        return; // Not our command, let it pass through
+      }
+
+      log.info(LOG.HOOK, `/pocket command intercepted`, {
+        sessionID: input.sessionID,
+        arguments: input.arguments,
+      });
+
+      // Clear parts FIRST to prevent the command template from being sent to the main session's LLM
+      // This stops the normal command execution flow - we handle it entirely in the plugin
+      output.parts.length = 0;
+
+      const parsed = parsePocketCommand(input.arguments);
+      if (!parsed) {
+        log.warn(LOG.HOOK, `/pocket command parse failed - empty input`);
+        return;
+      }
+
+      const result = await executePocketCommand({
+        message: parsed.message,
+        target: parsed.target,
+        mainSessionID: input.sessionID,
+      });
+
+      log.info(LOG.HOOK, `/pocket command result`, {
+        success: result.success,
+        message: result.message,
+      });
     },
 
     // Add broadcast, recall, and subagent to subagent_tools (based on config)

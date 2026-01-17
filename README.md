@@ -141,6 +141,50 @@ recall(agent_name="agentA", show_output=true)   # Include agent's final output
 </details>
 
 <details>
+<summary>Commands</summary>
+
+### `/pocket` — Send messages to agents
+
+While a pocket universe is running, you can send messages directly to agents from the main session:
+
+```
+/pocket @agentB wrap it up       → sends to agentB specifically
+/pocket wrap it up               → sends to coordinator (first agent)
+```
+
+**Setup:**
+
+Copy the command template to your OpenCode commands directory:
+
+```bash
+# Global (works everywhere)
+cp ~/.config/opencode/plugin/pocket-universe/command/pocket.md ~/.opencode/command/pocket.md
+
+# Or project-local
+cp ~/.config/opencode/plugin/pocket-universe/command/pocket.md .opencode/command/pocket.md
+```
+
+**Behavior:**
+
+- Message sender appears as `"user"` so agents know it came from you
+- If the target agent is idle, it will be resumed automatically
+- Only works when a pocket universe is active (agents are running)
+
+**Safety:**
+
+- Cannot message agents from previous pockets (already completed)
+- Returns an error if no pocket is currently active
+- Returns an error if the specified agent doesn't exist
+
+**Use cases:**
+
+- Give agents mid-task instructions: `/pocket @agentB also add unit tests`
+- Redirect work: `/pocket @agentA hand off the API work to agentB`
+- Signal urgency: `/pocket wrap it up, we need to ship`
+
+</details>
+
+<details>
 <summary>Session Lifecycle</summary>
 
 ```mermaid

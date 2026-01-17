@@ -21,6 +21,7 @@ import {
   callerPendingSubagents,
   mainSessionActiveChildren,
   completedFirstLevelChildren,
+  mainSessionCoordinator,
   pendingSubagentOutputs,
   getAlias,
   setDescription,
@@ -499,6 +500,17 @@ export function createHooks(client: OpenCodeSessionClient) {
               mainSessionId: parentId,
               pocketId: sessionId,
               firstChildAlias: getAlias(sessionId),
+            });
+          }
+
+          // Set coordinator (first child) if not already set
+          if (!mainSessionCoordinator.has(parentId)) {
+            const alias = getAlias(sessionId);
+            mainSessionCoordinator.set(parentId, { sessionId, alias });
+            log.info(LOG.HOOK, `Coordinator set for main session`, {
+              mainSessionId: parentId,
+              coordinatorSessionId: sessionId,
+              coordinatorAlias: alias,
             });
           }
 
