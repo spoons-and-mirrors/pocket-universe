@@ -220,7 +220,8 @@ export const aliasToSession = new Map<string, string>();
 export const agentDescriptions = new Map<string, string[]>(); // alias -> status history (most recent last)
 
 // Atomic alias counter with registration lock
-let nextAgentIndex = 0;
+// Per-root session naming counters (rootSessionId -> nextIndex)
+const sessionNamingCounters = new Map<string, number>();
 const registeringSessionsLock = new Set<string>(); // Prevent race conditions
 
 // DORMANT: parent alias feature
@@ -401,13 +402,22 @@ setInterval(cleanupExpiredMessages, CLEANUP_INTERVAL_MS);
 // Alias management
 // ============================================================================
 
-export function getNextAlias(): string {
-  const index = nextAgentIndex;
-  nextAgentIndex++;
+/**
+ * Get the next alias for a new agent, scoped to a root session.
+ * Each main session has its own naming sequence (agentA, agentB, ...).
+ * If no rootId is provided, falls back to a global counter.
+ */
+export function getNextAlias(rootId?: string): string {
+  const counterKey = rootId || '__global__';
+  const index = sessionNamingCounters.get(counterKey) || 0;
+  sessionNamingCounters.set(counterKey, index + 1);
 
   const letter = String.fromCharCode(CHAR_CODE_A + (index % ALPHABET_SIZE));
   const suffix = index >= ALPHABET_SIZE ? Math.floor(index / ALPHABET_SIZE).toString() : '';
-  return `agent${letter}${suffix}`;
+  const alias = `agent${letter}${suffix}`;
+
+  log.debug(LOG.SESSION, `Generated alias`, { rootId: counterKey, index, alias });
+  return alias;
 }
 
 export function getAlias(sessionId: string): string {
@@ -483,7 +493,13 @@ export function getInbox(sessionId: string): Message[] {
   return inboxes.get(sessionId)!;
 }
 
-export function registerSession(sessionId: string): void {
+/**
+ * Register a session and assign it an alias.
+ * Alias naming is scoped to the root session (main session).
+ * @param sessionId - The session to register
+ * @param rootId - Optional root session ID for scoped naming (if known)
+ */
+export function registerSession(sessionId: string, rootId?: string): void {
   // Don't re-register sessions that have been cleaned up
   if (cleanedUpSessions.has(sessionId)) {
     log.debug(LOG.SESSION, `Skipping registration for cleaned up session`, {
@@ -505,12 +521,13 @@ export function registerSession(sessionId: string): void {
   try {
     if (!activeSessions.has(sessionId)) {
       activeSessions.add(sessionId);
-      const alias = getNextAlias();
+      const alias = getNextAlias(rootId);
       sessionToAlias.set(sessionId, alias);
       aliasToSession.set(alias, sessionId);
       log.info(LOG.SESSION, `Session registered`, {
         sessionId,
         alias,
+        rootId: rootId || 'unknown',
         totalSessions: activeSessions.size,
       });
     }

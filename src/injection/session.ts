@@ -101,3 +101,29 @@ export async function getParentIdForSubagent(
     return null;
   }
 }
+
+/**
+ * Get the root session ID (main session) by traversing up the parent chain.
+ * The root session is the topmost session with no parent.
+ * Used for scoping agent naming per main session.
+ */
+export async function getRootSessionId(
+  client: OpenCodeSessionClient,
+  sessionId: string,
+): Promise<string> {
+  let currentId = sessionId;
+  let parentId = await getParentId(client, currentId);
+
+  // Traverse up until we find a session with no parent
+  while (parentId) {
+    currentId = parentId;
+    parentId = await getParentId(client, currentId);
+  }
+
+  log.debug(LOG.SESSION, `Found root session`, {
+    originalSessionId: sessionId,
+    rootSessionId: currentId,
+  });
+
+  return currentId;
+}

@@ -48,6 +48,7 @@ import {
   markSubagentCompleted,
   injectPocketUniverseSummaryToMain,
   createSummaryCoverMessage,
+  getRootSessionId,
 } from '../injection/index';
 import { createAgentWorktree } from '../worktree';
 import { getMaxSubagentDepth, isWorktreeEnabled } from '../config';
@@ -470,8 +471,11 @@ export function createHooks(client: OpenCodeSessionClient) {
         return;
       }
 
+      // Get root session ID for scoped naming
+      const rootId = await getRootSessionId(client, sessionId);
+
       // Register child session early - before agent even calls broadcast
-      registerSession(sessionId);
+      registerSession(sessionId, rootId);
 
       // Create worktree if enabled and not already created (for native task children)
       // Spawned children already have worktrees created in spawn tool
@@ -693,7 +697,9 @@ export function createHooks(client: OpenCodeSessionClient) {
 
       // Register the session early so the agent knows its alias from the start
       // This must happen before we call getAlias() or inject any broadcasts
-      registerSession(sessionId);
+      // Get root session ID for scoped naming
+      const rootId = await getRootSessionId(client, sessionId);
+      registerSession(sessionId, rootId);
 
       const unhandled = getUnhandledMessages(sessionId);
       const parallelAgents = getParallelAgents(sessionId);

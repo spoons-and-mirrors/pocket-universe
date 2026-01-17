@@ -40,6 +40,7 @@ import {
   injectTaskPartToParent,
   fetchSubagentOutput,
   markSubagentCompleted,
+  getRootSessionId,
 } from '../injection/index';
 import { createAgentWorktree } from '../worktree';
 import { getMaxSubagentDepth, isWorktreeEnabled, isSubagentResultForcedAttention } from '../config';
@@ -198,7 +199,9 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
         }
 
         // Pre-register the new session so it can immediately use broadcast
-        registerSession(newSessionId);
+        // Get root session ID for scoped naming (parentId is the root for subagents)
+        const rootId = await getRootSessionId(client, newSessionId);
+        registerSession(newSessionId, rootId);
         const newAlias = getAlias(newSessionId);
 
         // Set virtual depth for the new subagent (caller's depth + 1)
