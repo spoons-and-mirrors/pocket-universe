@@ -5,7 +5,13 @@
 import { resumeBroadcastPrompt } from '../prompts/broadcast.prompts';
 import { formatSubagentOutput } from '../prompts/subagent.prompts';
 import { log, LOG } from '../logger';
-import { sessionToAlias, sessionStates, getStoredClient, pendingSubagentOutputs } from '../state';
+import {
+  sessionToAlias,
+  sessionStates,
+  getStoredClient,
+  pendingSubagentOutputs,
+  getSessionModelInfo,
+} from '../state';
 import { getMessagesNeedingResume, markMessagesAsPresented } from './core';
 
 /**
@@ -54,10 +60,15 @@ export async function resumeSessionWithBroadcast(
     // This is wrapped in an IIFE so we don't block the caller
     (async () => {
       try {
+        // Get the session's agent/model info (stored when subagent was created)
+        const modelInfo = getSessionModelInfo(recipientSessionId);
+
         await storedClient.session.prompt({
           path: { id: recipientSessionId },
           body: {
             parts: [{ type: 'text', text: resumePrompt }],
+            agent: modelInfo?.agent,
+            model: modelInfo?.model,
           },
         });
 
@@ -133,14 +144,21 @@ export async function resumeWithSubagentOutput(
   const storedClient = getStoredClient();
   if (storedClient) {
     try {
+      // Get the session's agent/model info (stored when subagent was created)
+      const modelInfo = getSessionModelInfo(recipientSessionId);
+
       await storedClient.session.prompt({
         path: { id: recipientSessionId },
         body: {
           noReply: true,
           parts: [{ type: 'text', text: formattedOutput }],
+          agent: modelInfo?.agent,
+          model: modelInfo?.model,
         } as unknown as {
           parts: Array<{ type: string; text: string }>;
           noReply: boolean;
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
         },
       });
 

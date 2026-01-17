@@ -263,6 +263,29 @@ export const completedFirstLevelChildren = new Map<string, Set<string>>();
 // Key: main session ID, Value: { sessionId, alias } of the first child
 export const mainSessionCoordinator = new Map<string, { sessionId: string; alias: string }>();
 
+// Store agent/model info per session for resumption and /pocket command
+// When sending messages to a session, we need to use ITS agent/model, not the current session's
+// Key: session ID, Value: { agent, model }
+export interface SessionModelInfo {
+  agent?: string;
+  model?: { modelID?: string; providerID?: string };
+}
+export const sessionModelInfo = new Map<string, SessionModelInfo>();
+
+export function getSessionModelInfo(sessionId: string): SessionModelInfo | undefined {
+  return sessionModelInfo.get(sessionId);
+}
+
+export function setSessionModelInfo(sessionId: string, info: SessionModelInfo): void {
+  sessionModelInfo.set(sessionId, info);
+  log.debug(LOG.SESSION, `Session model info stored`, {
+    sessionId,
+    agent: info.agent,
+    modelID: info.model?.modelID,
+    providerID: info.model?.providerID,
+  });
+}
+
 // Track sessions that have been cleaned up to prevent re-registration
 // After cleanup, hooks may still fire for these sessions - we must ignore them
 export const cleanedUpSessions = new Set<string>();
@@ -594,6 +617,7 @@ export function cleanupCompletedAgents(): void {
   mainSessionActiveChildren.clear();
   completedFirstLevelChildren.clear();
   mainSessionCoordinator.clear();
+  sessionModelInfo.clear();
   pendingSubagentOutputs.clear();
   // Note: We do NOT clear cleanedUpSessions here - it tracks sessions across cleanups
   pendingTaskDescriptions.clear();

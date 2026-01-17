@@ -27,6 +27,7 @@ import {
   saveAgentToHistory,
   getVirtualDepth,
   setVirtualDepth,
+  setSessionModelInfo,
 } from '../state';
 import {
   sendMessage,
@@ -55,7 +56,8 @@ interface CallerModelInfo {
 }
 
 /**
- * Get the caller's agent and model info from their latest assistant message.
+ * Get the caller's agent and model info from their latest user message.
+ * In OpenCode, model/agent info is stored on USER messages, not assistant messages.
  * This is used to inherit agent/model when creating new subagent sessions.
  */
 async function getCallerModelInfo(
@@ -73,10 +75,10 @@ async function getCallerModelInfo(
       return {};
     }
 
-    // Find the latest assistant message (has agent/model info)
+    // Find the latest USER message (model/agent info is stored on user messages in OpenCode)
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      if (msg.info.role === 'assistant') {
+      if (msg.info.role === 'user') {
         const info: CallerModelInfo = {};
 
         // Type assertion to access agent/model fields not in minimal interface
@@ -104,7 +106,7 @@ async function getCallerModelInfo(
           };
         }
 
-        log.debug(LOG.TOOL, `Found caller model info`, {
+        log.debug(LOG.TOOL, `Found caller model info from user message`, {
           sessionId,
           agent: info.agent,
           modelID: info.model?.modelID,
@@ -115,7 +117,7 @@ async function getCallerModelInfo(
       }
     }
 
-    log.debug(LOG.TOOL, `No assistant message found for session`, {
+    log.debug(LOG.TOOL, `No user message found for session`, {
       sessionId,
     });
     return {};
@@ -284,6 +286,14 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           modelID: callerModelInfo.model?.modelID,
           providerID: callerModelInfo.model?.providerID,
         });
+
+        // Store the model info for this session (used by /pocket and resume)
+        if (callerModelInfo.agent || callerModelInfo.model) {
+          setSessionModelInfo(newSessionId, {
+            agent: callerModelInfo.agent,
+            model: callerModelInfo.model,
+          });
+        }
 
         // Fire and forget - don't await the prompt
         client.session
