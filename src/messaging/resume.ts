@@ -10,7 +10,7 @@ import {
   sessionStates,
   getStoredClient,
   pendingSubagentOutputs,
-  getSessionModelInfo,
+  getOrFetchModelInfo,
 } from '../state';
 import { getMessagesNeedingResume, markMessagesAsPresented } from './core';
 
@@ -60,8 +60,25 @@ export async function resumeSessionWithBroadcast(
     // This is wrapped in an IIFE so we don't block the caller
     (async () => {
       try {
-        // Get the session's agent/model info (stored when subagent was created)
-        const modelInfo = getSessionModelInfo(recipientSessionId);
+        // Get the TARGET session's agent/model info (with fallback to fetch)
+        const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
+
+        log.debug(LOG.MESSAGE, `Resume using model info`, {
+          recipientSessionId,
+          recipientAlias,
+          agent: modelInfo?.agent,
+          modelID: modelInfo?.model?.modelID,
+          providerID: modelInfo?.model?.providerID,
+        });
+
+        await storedClient.session.prompt({
+          path: { id: recipientSessionId },
+          body: {
+            parts: [{ type: 'text', text: resumePrompt }],
+            agent: modelInfo?.agent,
+            model: modelInfo?.model,
+          },
+        });
 
         await storedClient.session.prompt({
           path: { id: recipientSessionId },
@@ -144,8 +161,31 @@ export async function resumeWithSubagentOutput(
   const storedClient = getStoredClient();
   if (storedClient) {
     try {
-      // Get the session's agent/model info (stored when subagent was created)
-      const modelInfo = getSessionModelInfo(recipientSessionId);
+      // Get the TARGET session's agent/model info (with fallback to fetch)
+      const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
+
+      log.debug(LOG.MESSAGE, `Subagent output using model info`, {
+        recipientSessionId,
+        recipientAlias,
+        agent: modelInfo?.agent,
+        modelID: modelInfo?.model?.modelID,
+        providerID: modelInfo?.model?.providerID,
+      });
+
+      await storedClient.session.prompt({
+        path: { id: recipientSessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: 'text', text: formattedOutput }],
+          agent: modelInfo?.agent,
+          model: modelInfo?.model,
+        } as unknown as {
+          parts: Array<{ type: string; text: string }>;
+          noReply: boolean;
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
+        },
+      });
 
       await storedClient.session.prompt({
         path: { id: recipientSessionId },

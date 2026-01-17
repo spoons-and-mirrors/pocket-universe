@@ -9,11 +9,8 @@ import {
   cleanedUpSessions,
   mainSessionCoordinator,
   getStoredClient,
-  getSessionModelInfo,
-  setSessionModelInfo,
-  type SessionModelInfo,
+  getOrFetchModelInfo,
 } from '../state';
-import type { OpenCodeSessionClient } from '../types';
 
 // ============================================================================
 // Types
@@ -34,90 +31,23 @@ export interface PocketCommandResult {
 }
 
 // ============================================================================
-// Model Info Helpers
+// Parsing
+// ============================================================================
+// Types
 // ============================================================================
 
-/**
- * Fetch model info from a session's last user message.
- * This mimics OpenCode's internal `lastModel` function.
- * Used as a fallback when we don't have stored model info (e.g., for first-level children
- * created by OpenCode's task tool rather than our subagent tool).
- */
-async function fetchSessionModelInfo(
-  client: OpenCodeSessionClient,
-  sessionId: string,
-): Promise<SessionModelInfo | null> {
-  try {
-    const messagesResult = await client.session.messages({
-      path: { id: sessionId },
-    });
-
-    const messages = messagesResult.data;
-    if (!messages || messages.length === 0) {
-      return null;
-    }
-
-    // Find the latest USER message (model/agent info is stored on user messages in OpenCode)
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.info.role === 'user') {
-        const msgInfo = msg.info as {
-          agent?: string;
-          model?: { modelID?: string; providerID?: string };
-        };
-
-        if (msgInfo.agent || msgInfo.model) {
-          const info: SessionModelInfo = {
-            agent: msgInfo.agent,
-            model: msgInfo.model,
-          };
-
-          log.debug(LOG.MESSAGE, `Fetched model info from session messages`, {
-            sessionId,
-            agent: info.agent,
-            modelID: info.model?.modelID,
-            providerID: info.model?.providerID,
-          });
-
-          return info;
-        }
-      }
-    }
-
-    return null;
-  } catch (e) {
-    log.warn(LOG.MESSAGE, `Failed to fetch session model info`, {
-      sessionId,
-      error: String(e),
-    });
-    return null;
-  }
+export interface PocketCommandArgs {
+  /** The message to send */
+  message: string;
+  /** Target agent alias (optional, defaults to coordinator) */
+  target?: string;
+  /** The main session ID where command was invoked */
+  mainSessionID: string;
 }
 
-/**
- * Get model info for a session, with fallback to fetching from session messages.
- * First checks stored model info, then fetches from session if not stored.
- */
-async function getOrFetchModelInfo(
-  client: OpenCodeSessionClient,
-  sessionId: string,
-): Promise<SessionModelInfo | undefined> {
-  // First try stored model info
-  let modelInfo = getSessionModelInfo(sessionId);
-
-  if (modelInfo) {
-    return modelInfo;
-  }
-
-  // Fallback: fetch from session messages
-  const fetched = await fetchSessionModelInfo(client, sessionId);
-  if (fetched) {
-    // Cache it for future use
-    setSessionModelInfo(sessionId, fetched);
-    return fetched;
-  }
-
-  return undefined;
+export interface PocketCommandResult {
+  success: boolean;
+  message: string;
 }
 
 // ============================================================================

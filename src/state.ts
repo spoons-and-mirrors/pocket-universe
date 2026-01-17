@@ -286,6 +286,99 @@ export function setSessionModelInfo(sessionId: string, info: SessionModelInfo): 
   });
 }
 
+/**
+ * Fetch model info from a session's last user message.
+ * This mimics OpenCode's internal `lastModel` function.
+ * Used as a fallback when we don't have stored model info.
+ */
+export async function fetchSessionModelInfo(
+  client: OpenCodeSessionClient,
+  sessionId: string,
+): Promise<SessionModelInfo | null> {
+  try {
+    const messagesResult = await client.session.messages({
+      path: { id: sessionId },
+    });
+
+    const messages = messagesResult.data;
+    if (!messages || messages.length === 0) {
+      return null;
+    }
+
+    // Find the latest USER message (model/agent info is stored on user messages in OpenCode)
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.info.role === 'user') {
+        const msgInfo = msg.info as {
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
+        };
+
+        if (msgInfo.agent || msgInfo.model) {
+          const info: SessionModelInfo = {
+            agent: msgInfo.agent,
+            model: msgInfo.model,
+          };
+
+          log.debug(LOG.SESSION, `Fetched model info from session messages`, {
+            sessionId,
+            agent: info.agent,
+            modelID: info.model?.modelID,
+            providerID: info.model?.providerID,
+          });
+
+          return info;
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    log.warn(LOG.SESSION, `Failed to fetch session model info`, {
+      sessionId,
+      error: String(e),
+    });
+    return null;
+  }
+}
+
+/**
+ * Get model info for a session, with fallback to fetching from session messages.
+ * First checks stored model info, then fetches from session if not stored.
+ */
+export async function getOrFetchModelInfo(
+  client: OpenCodeSessionClient,
+  sessionId: string,
+): Promise<SessionModelInfo | undefined> {
+  // First try stored model info
+  let modelInfo = getSessionModelInfo(sessionId);
+
+  if (modelInfo) {
+    return modelInfo;
+  }
+
+  // Fallback: fetch from session messages
+  const fetched = await fetchSessionModelInfo(client, sessionId);
+  if (fetched) {
+    // Cache it for future use
+    setSessionModelInfo(sessionId, fetched);
+    return fetched;
+  }
+
+  return undefined;
+}
+
+// Store the client reference for use in hooks.ts resume logic
+let storedClientForHooks: OpenCodeSessionClient | null = null;
+
+export function setStoredClientForHooks(client: OpenCodeSessionClient): void {
+  storedClientForHooks = client;
+}
+
+export function getStoredClientForHooks(): OpenCodeSessionClient | null {
+  return storedClientForHooks;
+}
+
 // Track sessions that have been cleaned up to prevent re-registration
 // After cleanup, hooks may still fire for these sessions - we must ignore them
 export const cleanedUpSessions = new Set<string>();

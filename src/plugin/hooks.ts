@@ -31,6 +31,8 @@ import {
   setCurrentPocketId,
   getCurrentPocketId,
   getVirtualDepth,
+  getOrFetchModelInfo,
+  setStoredClientForHooks,
 } from '../state';
 import {
   resumeSessionWithBroadcast,
@@ -54,6 +56,9 @@ import { createAgentWorktree } from '../worktree';
 import { getMaxSubagentDepth, isWorktreeEnabled } from '../config';
 
 export function createHooks(client: OpenCodeSessionClient) {
+  // Store client for model info fetching in resume logic
+  setStoredClientForHooks(client);
+
   return {
     // Allow main session to wait for subagent grandchild sessions AND resumed sessions
     'session.before_complete': async (
@@ -158,7 +163,7 @@ export function createHooks(client: OpenCodeSessionClient) {
 
           log.info(
             LOG.SESSION,
-            `session.before_complete: has pending subagent output, setting resumePrompt`,
+            `session.before_complete: has pending subagent output, firing delayed prompt with model`,
             {
               sessionID: input.sessionID,
               alias,
@@ -167,28 +172,70 @@ export function createHooks(client: OpenCodeSessionClient) {
             },
           );
 
-          // Set resumePrompt - OpenCode will resume with this as a user message
-          output.resumePrompt = pendingOutput.output;
+          // Get model info for the TARGET session (this session, not the sender)
+          const modelInfo = await getOrFetchModelInfo(client, input.sessionID);
+
+          log.debug(LOG.SESSION, `session.before_complete: using model info for subagent output`, {
+            sessionID: input.sessionID,
+            alias,
+            agent: modelInfo?.agent,
+            modelID: modelInfo?.model?.modelID,
+            providerID: modelInfo?.model?.providerID,
+          });
+
+          // WORKAROUND: OpenCode's resumePrompt doesn't support model/agent fields.
+          // Fire a delayed prompt with the correct model AFTER the hook returns.
+          const sessionIdToResume = input.sessionID;
+          const outputText = pendingOutput.output;
+          setImmediate(() => {
+            log.info(LOG.SESSION, `Firing delayed subagent output prompt with model`, {
+              sessionID: sessionIdToResume,
+              alias,
+            });
+            client.session
+              .prompt({
+                path: { id: sessionIdToResume },
+                body: {
+                  parts: [{ type: 'text', text: outputText }],
+                  agent: modelInfo?.agent,
+                  model: modelInfo?.model,
+                } as unknown as {
+                  parts: Array<{ type: string; text: string }>;
+                  agent?: string;
+                  model?: { modelID?: string; providerID?: string };
+                },
+              })
+              .catch((e: unknown) => {
+                log.error(LOG.SESSION, `Delayed subagent output prompt failed`, {
+                  sessionID: sessionIdToResume,
+                  alias,
+                  error: String(e),
+                });
+              });
+          });
 
           log.info(
             LOG.SESSION,
-            `session.before_complete: resumePrompt set for subagent output, breaking loop`,
+            `session.before_complete: scheduled delayed subagent output prompt, breaking loop`,
             {
               sessionID: input.sessionID,
               alias,
             },
           );
 
-          // Break out - OpenCode will handle the resume and call this hook again
+          // Break out - we DON'T set resumePrompt, letting the session "complete".
+          // Our setImmediate will fire the prompt with correct model.
           break;
         }
 
         // 3. Check for unread messages (may have been piped from completed spawns)
+        // NOTE: With forced_attention=false, these need the setImmediate workaround
+        // because they're "real" user messages that OpenCode would process with wrong model.
         const unreadMessages = getMessagesNeedingResume(input.sessionID);
         if (unreadMessages.length > 0) {
           log.info(
             LOG.SESSION,
-            `session.before_complete: has unread messages, setting resumePrompt`,
+            `session.before_complete: has unread messages, firing delayed prompt with model`,
             {
               sessionID: input.sessionID,
               alias,
@@ -200,21 +247,59 @@ export function createHooks(client: OpenCodeSessionClient) {
           const firstUnread = unreadMessages[0];
           markMessagesAsPresented(input.sessionID, [firstUnread.msgIndex]);
 
-          // Tell OpenCode to resume this session with the given prompt
-          // OpenCode will:
-          // 1. Complete this hook
-          // 2. Start a new prompt with resumePrompt
-          // 3. Wait for that prompt to complete
-          // 4. Then session.before_complete fires again (recursively)
-          // This avoids the deadlock of calling prompt() from within the hook
-          output.resumePrompt = resumeBroadcastPrompt(firstUnread.from);
+          // Get model info for this session
+          const modelInfo = await getOrFetchModelInfo(client, input.sessionID);
+          const resumeText = resumeBroadcastPrompt(firstUnread.from);
 
-          log.info(LOG.SESSION, `session.before_complete: resumePrompt set, breaking loop`, {
+          log.debug(LOG.SESSION, `session.before_complete: using model info for unread messages`, {
             sessionID: input.sessionID,
             alias,
+            agent: modelInfo?.agent,
+            modelID: modelInfo?.model?.modelID,
+            providerID: modelInfo?.model?.providerID,
           });
 
-          // Break out - OpenCode will handle the resume and call this hook again
+          // WORKAROUND: OpenCode's resumePrompt doesn't support model/agent fields.
+          // Fire a delayed prompt with the correct model AFTER the hook returns.
+          const sessionIdToResume = input.sessionID;
+          setImmediate(() => {
+            log.info(LOG.SESSION, `Firing delayed unread messages prompt with model`, {
+              sessionID: sessionIdToResume,
+              alias,
+            });
+            client.session
+              .prompt({
+                path: { id: sessionIdToResume },
+                body: {
+                  parts: [{ type: 'text', text: resumeText }],
+                  agent: modelInfo?.agent,
+                  model: modelInfo?.model,
+                } as unknown as {
+                  parts: Array<{ type: string; text: string }>;
+                  agent?: string;
+                  model?: { modelID?: string; providerID?: string };
+                },
+              })
+              .catch((e: unknown) => {
+                log.error(LOG.SESSION, `Delayed unread messages prompt failed`, {
+                  sessionID: sessionIdToResume,
+                  alias,
+                  error: String(e),
+                });
+              });
+          });
+
+          log.info(
+            LOG.SESSION,
+            `session.before_complete: scheduled delayed unread messages prompt, breaking loop`,
+            {
+              sessionID: input.sessionID,
+              alias,
+            },
+          );
+
+          // Break out - we DON'T set resumePrompt, letting the session "complete".
+          // Our setImmediate will fire the prompt with correct model.
           break;
         }
 
