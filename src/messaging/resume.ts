@@ -136,8 +136,8 @@ export async function resumeSessionWithBroadcast(
 /**
  * Pipe subagent output to the caller session (forced_attention: false mode).
  *
- * When caller is ACTIVE: persist visible user message with noReply (caller sees it during iteration)
- * When caller is IDLE: store in pendingSubagentOutputs, hook uses resumePrompt to resume
+ * Always stores in pendingSubagentOutputs for session.before.idle hook to pick up.
+ * The hook will set resumePrompt to continue the session with the subagent output.
  */
 export async function resumeWithSubagentOutput(
   recipientSessionId: string,
@@ -149,143 +149,37 @@ export async function resumeWithSubagentOutput(
   // Format the output message
   const formattedOutput = formatSubagentOutput(senderAlias, subagentOutput);
 
-  // Check if caller is idle
-  const callerState = sessionStates.get(recipientSessionId);
-  const callerIsIdle = callerState?.status === 'idle';
-
   log.info(LOG.MESSAGE, `Piping subagent output to caller (no forced attention)`, {
     recipientSessionId,
     recipientAlias,
     senderAlias,
-    callerIsIdle,
     outputLength: subagentOutput.length,
   });
 
-  const storedClient = getStoredClient();
-
-  // ACTIVE CALLER: Persist a visible user message with noReply
-  // This creates a new visible message in the TUI but doesn't trigger a new response
-  if (!callerIsIdle && storedClient) {
-    try {
-      const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
-
-      log.debug(LOG.MESSAGE, `Persisting visible subagent output for active caller`, {
-        recipientSessionId,
-        recipientAlias,
-        senderAlias,
-        agent: modelInfo?.agent,
-        modelID: modelInfo?.model?.modelID,
-      });
-
-      await storedClient.session.prompt({
-        path: { id: recipientSessionId },
-        body: {
-          noReply: true,
-          parts: [{ type: 'text', text: formattedOutput }],
-          agent: modelInfo?.agent,
-          model: modelInfo?.model,
-        } as unknown as {
-          parts: Array<{ type: string; text: string }>;
-          noReply: boolean;
-          agent?: string;
-          model?: { modelID?: string; providerID?: string };
-        },
-      });
-
-      log.info(LOG.MESSAGE, `Persisted visible subagent output for active caller`, {
-        recipientSessionId,
-        recipientAlias,
-        senderAlias,
-      });
-
-      return true;
-    } catch (e) {
-      log.warn(LOG.MESSAGE, `Failed to persist visible message, falling back to pending`, {
-        recipientSessionId,
-        recipientAlias,
-        senderAlias,
-        error: String(e),
-      });
-      // Fall through to store in pendingSubagentOutputs
-    }
-  }
-
-  // IDLE CALLER (or fallback): Store for session.before.idle to pick up via resumePrompt
+  // ALWAYS store in pendingSubagentOutputs for session.before.idle to pick up via resumePrompt
+  // This ensures the output is processed even if the caller is about to complete.
+  // The noReply approach for active callers is racy - by the time the message is persisted,
+  // the caller may have already finished its iteration and won't see the new message.
   pendingSubagentOutputs.set(recipientSessionId, {
     senderAlias,
     output: formattedOutput,
   });
 
-  log.info(LOG.MESSAGE, `Subagent output stored for caller`, {
+  log.info(LOG.MESSAGE, `Subagent output stored for caller (pending hook pickup)`, {
     recipientSessionId,
     recipientAlias,
     senderAlias,
   });
 
-  // If caller is idle, we need to resume the session so session.before.idle fires
-  if (callerIsIdle) {
-    log.info(LOG.MESSAGE, `Caller is idle, resuming to process subagent output`, {
-      recipientSessionId,
-      recipientAlias,
-      senderAlias,
-    });
+  // NOTE: We don't need to manually resume here!
+  // The session.before.idle hook will fire when the caller's current iteration completes,
+  // and it will pick up the pendingSubagentOutputs and set resumePrompt.
+  // This works for both active and idle callers:
+  // - Active caller: hook fires after current iteration, picks up output, sets resumePrompt
+  // - Idle caller: session is already waiting, hook has already fired or will fire soon
+  //
+  // The key insight is that session.before.idle fires BEFORE the session completes,
+  // so we can always intercept and continue with resumePrompt.
 
-    const storedClient = getStoredClient();
-    if (storedClient) {
-      try {
-        // Get the TARGET session's agent/model info (with fallback to fetch)
-        const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
-
-        log.debug(LOG.MESSAGE, `Subagent output resume using model info`, {
-          recipientSessionId,
-          recipientAlias,
-          agent: modelInfo?.agent,
-          modelID: modelInfo?.model?.modelID,
-          providerID: modelInfo?.model?.providerID,
-        });
-
-        // Mark session as active before resuming
-        if (callerState) {
-          callerState.status = 'active';
-          callerState.lastActivity = Date.now();
-        }
-
-        // Fire the resume - session.before_complete will pick up pendingSubagentOutputs
-        // We use the formatted output directly so the agent sees it
-        await storedClient.session.prompt({
-          path: { id: recipientSessionId },
-          body: {
-            parts: [{ type: 'text', text: formattedOutput }],
-            agent: modelInfo?.agent,
-            model: modelInfo?.model,
-          },
-        });
-
-        log.info(LOG.MESSAGE, `Resumed idle caller to process subagent output`, {
-          recipientSessionId,
-          recipientAlias,
-          senderAlias,
-        });
-
-        return true;
-      } catch (e) {
-        log.error(LOG.MESSAGE, `Failed to resume idle caller for subagent output`, {
-          recipientSessionId,
-          recipientAlias,
-          senderAlias,
-          error: String(e),
-        });
-        return false;
-      }
-    } else {
-      log.warn(LOG.MESSAGE, `Cannot resume idle caller - no client available`, {
-        recipientSessionId,
-        recipientAlias,
-      });
-      return false;
-    }
-  }
-
-  // Caller is active - session.before_complete will pick up pendingSubagentOutputs
   return true;
 }

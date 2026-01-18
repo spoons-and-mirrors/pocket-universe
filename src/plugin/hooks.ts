@@ -191,78 +191,34 @@ export function createHooks(client: OpenCodeSessionClient) {
         }
 
         // 3. Check for unread messages (may have been piped from completed spawns)
-        // NOTE: With forced_attention=false, these need the setImmediate workaround
-        // because they're "real" user messages that OpenCode would process with wrong model.
+        // Use resumePrompt directly - setImmediate is racy (session completes before prompt fires)
         const unreadMessages = getMessagesNeedingResume(input.sessionID);
         if (unreadMessages.length > 0) {
-          log.info(
-            LOG.SESSION,
-            `session.before.idle: has unread messages, firing delayed prompt with model`,
-            {
-              sessionID: input.sessionID,
-              alias,
-              unreadCount: unreadMessages.length,
-            },
-          );
+          log.info(LOG.SESSION, `session.before.idle: has unread messages, setting resumePrompt`, {
+            sessionID: input.sessionID,
+            alias,
+            unreadCount: unreadMessages.length,
+          });
 
           // Mark the message as presented so we don't loop forever
           const firstUnread = unreadMessages[0];
           markMessagesAsPresented(input.sessionID, [firstUnread.msgIndex]);
 
-          // Get model info for this session
-          const modelInfo = await getOrFetchModelInfo(client, input.sessionID);
+          // Use resumePrompt directly - this is synchronous and guaranteed to work
+          // The model/agent fields aren't supported by resumePrompt, but the session
+          // will use its existing model/agent configuration.
           const resumeText = resumeBroadcastPrompt(firstUnread.from);
 
-          log.debug(LOG.SESSION, `session.before.idle: using model info for unread messages`, {
+          log.info(LOG.SESSION, `session.before.idle: setting resumePrompt for unread messages`, {
             sessionID: input.sessionID,
             alias,
-            agent: modelInfo?.agent,
-            modelID: modelInfo?.model?.modelID,
-            providerID: modelInfo?.model?.providerID,
+            senderAlias: firstUnread.from,
           });
 
-          // WORKAROUND: OpenCode's resumePrompt doesn't support model/agent fields.
-          // Fire a delayed prompt with the correct model AFTER the hook returns.
-          const sessionIdToResume = input.sessionID;
-          setImmediate(() => {
-            log.info(LOG.SESSION, `Firing delayed unread messages prompt with model`, {
-              sessionID: sessionIdToResume,
-              alias,
-            });
-            client.session
-              .prompt({
-                path: { id: sessionIdToResume },
-                body: {
-                  parts: [{ type: 'text', text: resumeText }],
-                  agent: modelInfo?.agent,
-                  model: modelInfo?.model,
-                } as unknown as {
-                  parts: Array<{ type: string; text: string }>;
-                  agent?: string;
-                  model?: { modelID?: string; providerID?: string };
-                },
-              })
-              .catch((e: unknown) => {
-                log.error(LOG.SESSION, `Delayed unread messages prompt failed`, {
-                  sessionID: sessionIdToResume,
-                  alias,
-                  error: String(e),
-                });
-              });
-          });
+          output.resumePrompt = resumeText;
 
-          log.info(
-            LOG.SESSION,
-            `session.before.idle: scheduled delayed unread messages prompt, breaking loop`,
-            {
-              sessionID: input.sessionID,
-              alias,
-            },
-          );
-
-          // Break out - we DON'T set resumePrompt, letting the session "complete".
-          // Our setImmediate will fire the prompt with correct model.
-          break;
+          // Continue the loop - after resume, we'll check again
+          continue;
         }
 
         // Nothing pending - we're done
