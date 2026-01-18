@@ -80,15 +80,6 @@ export async function resumeSessionWithBroadcast(
           },
         });
 
-        await storedClient.session.prompt({
-          path: { id: recipientSessionId },
-          body: {
-            parts: [{ type: 'text', text: resumePrompt }],
-            agent: modelInfo?.agent,
-            model: modelInfo?.model,
-          },
-        });
-
         // Mark session as idle after prompt completes
         const stateAfter = sessionStates.get(recipientSessionId);
         if (stateAfter) {
@@ -170,21 +161,6 @@ export async function resumeWithSubagentOutput(
         agent: modelInfo?.agent,
         modelID: modelInfo?.model?.modelID,
         providerID: modelInfo?.model?.providerID,
-      });
-
-      await storedClient.session.prompt({
-        path: { id: recipientSessionId },
-        body: {
-          noReply: true,
-          parts: [{ type: 'text', text: formattedOutput }],
-          agent: modelInfo?.agent,
-          model: modelInfo?.model,
-        } as unknown as {
-          parts: Array<{ type: string; text: string }>;
-          noReply: boolean;
-          agent?: string;
-          model?: { modelID?: string; providerID?: string };
-        },
       });
 
       await storedClient.session.prompt({
