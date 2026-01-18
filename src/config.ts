@@ -21,7 +21,7 @@ export interface PocketUniverseConfig {
     broadcast: boolean;
     /** Enable the subagent tool for creating sibling agents (default: true) */
     subagent: boolean;
-    /** Enable the recall tool for querying agent history (default: true) */
+    /** Enable the recall tool for querying agent history (default: false) */
     recall: boolean;
   };
   /** Tool configuration parameters */
@@ -55,7 +55,7 @@ const DEFAULT_CONFIG: PocketUniverseConfig = {
   tools: {
     broadcast: true,
     subagent: true,
-    recall: true,
+    recall: false,
   },
   parameters: {
     subagent_max_depth: 3,
