@@ -19,9 +19,21 @@ This ships with three tools creating a robust system for parallel agents to comm
 - **worktree** support for isolated agent workspaces (disabled by default)
 - **configurable** all tools work as standalone, can be enabled/disabled via config
 
----
+### TL:DR > 
+Harness forks like Oh My Opencode should really run on top of this
 
-## How It Works
+### Installation
+Add Pocket Universe to your opencode config's plugin array
+```json
+"plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
+```
+
+
+---
+<details>
+<summary>Diagram</summary>
+    
+### How It Works
 
 ```mermaid
 sequenceDiagram
@@ -49,12 +61,7 @@ sequenceDiagram
     A-->>Main: Finally completes
     Note over Main: Continues with full result
 ```
-
-## Installation
-
-```json
-"plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
-```
+</details>
 
 <details>
 <summary>Tools</summary>
