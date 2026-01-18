@@ -389,6 +389,16 @@ export const cleanedUpSessions = new Set<string>();
 // Key: recipient session ID, Value: { senderAlias, output }
 export const pendingSubagentOutputs = new Map<string, { senderAlias: string; output: string }>();
 
+// Track sessions currently inside session.before.idle hook
+// Used to distinguish "truly active" (making LLM calls) vs "waiting in hook"
+// Key: session ID that is currently in the hook
+export const sessionsInBeforeIdleHook = new Set<string>();
+
+// Track sessions where noReply was successfully delivered
+// The hook checks this to avoid double-delivering via resumePrompt
+// Key: session ID where noReply was used
+export const noReplyDeliveredSessions = new Set<string>();
+
 // ============================================================================
 // Virtual Depth Tracking (for spawn chain limits without actual nesting)
 // ============================================================================

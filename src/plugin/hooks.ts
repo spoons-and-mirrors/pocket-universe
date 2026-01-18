@@ -23,6 +23,8 @@ import {
   completedFirstLevelChildren,
   mainSessionCoordinator,
   pendingSubagentOutputs,
+  sessionsInBeforeIdleHook,
+  noReplyDeliveredSessions,
   getAlias,
   setDescription,
   registerSession,
@@ -71,6 +73,11 @@ export function createHooks(client: OpenCodeSessionClient) {
       output: { resumePrompt?: string },
     ) => {
       const alias = sessionToAlias.get(input.sessionID) || 'unknown';
+
+      // CRITICAL: Mark that this session is in the before.idle hook
+      // This tells resumeWithSubagentOutput to use pendingSubagentOutputs instead of noReply
+      // because noReply won't be seen (no more LLM calls are coming)
+      sessionsInBeforeIdleHook.add(input.sessionID);
 
       // Helper to wait for a session to become idle
       const waitForSessionIdle = (targetSessionId: string): Promise<void> => {
@@ -166,6 +173,23 @@ export function createHooks(client: OpenCodeSessionClient) {
           // Remove from pending to avoid infinite loop
           pendingSubagentOutputs.delete(input.sessionID);
 
+          // Check if noReply already delivered this message (for truly active callers)
+          // If so, skip resumePrompt to avoid duplicate delivery
+          if (noReplyDeliveredSessions.has(input.sessionID)) {
+            log.info(
+              LOG.SESSION,
+              `session.before.idle: pending output exists but noReply already delivered, skipping`,
+              {
+                sessionID: input.sessionID,
+                alias,
+                senderAlias: pendingOutput.senderAlias,
+              },
+            );
+            noReplyDeliveredSessions.delete(input.sessionID);
+            // Don't set resumePrompt - continue loop to check other conditions
+            continue;
+          }
+
           log.info(
             LOG.SESSION,
             `session.before.idle: has pending subagent output, setting resumePrompt`,
@@ -181,13 +205,16 @@ export function createHooks(client: OpenCodeSessionClient) {
           // NOTE: This doesn't support model/agent fields, but it WORKS
           output.resumePrompt = pendingOutput.output;
 
-          log.info(LOG.SESSION, `session.before.idle: resumePrompt set, session will resume`, {
+          log.info(LOG.SESSION, `session.before.idle: resumePrompt set, returning`, {
             sessionID: input.sessionID,
             alias,
           });
 
-          // Continue the loop - after resume, we'll check again
-          continue;
+          // IMPORTANT: Return immediately! Don't trigger completion logic.
+          // The session will resume with the new prompt.
+          // Clean up hook tracking before returning
+          sessionsInBeforeIdleHook.delete(input.sessionID);
+          return;
         }
 
         // 3. Check for unread messages (may have been piped from completed spawns)
@@ -217,8 +244,11 @@ export function createHooks(client: OpenCodeSessionClient) {
 
           output.resumePrompt = resumeText;
 
-          // Continue the loop - after resume, we'll check again
-          continue;
+          // IMPORTANT: Return immediately! Don't trigger completion logic.
+          // The session will resume with the new prompt.
+          // Clean up hook tracking before returning
+          sessionsInBeforeIdleHook.delete(input.sessionID);
+          return;
         }
 
         // Nothing pending - we're done
@@ -304,6 +334,8 @@ export function createHooks(client: OpenCodeSessionClient) {
           }
         }
 
+        // Clean up hook tracking before exiting loop
+        sessionsInBeforeIdleHook.delete(input.sessionID);
         break;
       }
     },
@@ -612,36 +644,10 @@ export function createHooks(client: OpenCodeSessionClient) {
 
       const sessionId = lastUserMsg.info.sessionID;
 
-      // Check for pending subagent outputs (user message mode - config false)
-      // These need to be injected immediately, not at session.before.idle
-      const pendingOutput = pendingSubagentOutputs.get(sessionId);
-      if (pendingOutput) {
-        // Remove from map before injecting to prevent double-injection
-        pendingSubagentOutputs.delete(sessionId);
-
-        log.info(LOG.INJECT, `Injecting pending subagent output into last user message`, {
-          sessionId,
-          senderAlias: pendingOutput.senderAlias,
-          outputLength: pendingOutput.output.length,
-        });
-
-        const now = Date.now();
-        const pendingPart = {
-          id: `prt_sub_out_${now}`,
-          sessionID: sessionId,
-          messageID: lastUserMsg.info.id,
-          type: 'text' as const,
-          text: pendingOutput.output,
-          synthetic: true,
-        };
-
-        lastUserMsg.parts.push(pendingPart);
-
-        log.info(LOG.INJECT, `Injected subagent output into last user message`, {
-          sessionId,
-          senderAlias: pendingOutput.senderAlias,
-        });
-      }
+      // NOTE: pendingSubagentOutputs are NOT injected here in message.transform.
+      // The injection would happen mid-turn when the model has already decided its actions.
+      // Instead, session.before.idle handles these via resumePrompt, ensuring the model
+      // gets a NEW turn to process the subagent output.
 
       // Check for pending subagents that need to be injected into this session
       const subagents = pendingSubagents.get(sessionId) || [];

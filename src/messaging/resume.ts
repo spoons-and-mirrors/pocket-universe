@@ -11,6 +11,8 @@ import {
   getStoredClient,
   pendingSubagentOutputs,
   getOrFetchModelInfo,
+  sessionsInBeforeIdleHook,
+  noReplyDeliveredSessions,
 } from '../state';
 import { getMessagesNeedingResume, markMessagesAsPresented } from './core';
 
@@ -136,8 +138,8 @@ export async function resumeSessionWithBroadcast(
 /**
  * Pipe subagent output to the caller session (forced_attention: false mode).
  *
- * Always stores in pendingSubagentOutputs for session.before.idle hook to pick up.
- * The hook will set resumePrompt to continue the session with the subagent output.
+ * When caller is ACTIVE: Use session.prompt({ noReply: true }) to inject visible message mid-stream
+ * When caller is IDLE: Store in pendingSubagentOutputs, hook uses resumePrompt to resume
  */
 export async function resumeWithSubagentOutput(
   recipientSessionId: string,
@@ -149,37 +151,97 @@ export async function resumeWithSubagentOutput(
   // Format the output message
   const formattedOutput = formatSubagentOutput(senderAlias, subagentOutput);
 
+  // Check caller state to decide delivery mechanism
+  const callerState = sessionStates.get(recipientSessionId);
+  const callerIsIdle = callerState?.status === 'idle';
+
+  // Check if caller is currently in session.before.idle hook (waiting for subagents)
+  // This is set by the hook when it starts and cleared when it ends
+  const callerInHook = sessionsInBeforeIdleHook.has(recipientSessionId);
+
   log.info(LOG.MESSAGE, `Piping subagent output to caller (no forced attention)`, {
     recipientSessionId,
     recipientAlias,
     senderAlias,
+    callerIsIdle,
+    callerInHook,
     outputLength: subagentOutput.length,
   });
 
-  // ALWAYS store in pendingSubagentOutputs for session.before.idle to pick up via resumePrompt
-  // This ensures the output is processed even if the caller is about to complete.
-  // The noReply approach for active callers is racy - by the time the message is persisted,
-  // the caller may have already finished its iteration and won't see the new message.
+  // ALWAYS store in pendingSubagentOutputs first (safety net for race conditions)
+  // The hook will check this after waiting for subagents
   pendingSubagentOutputs.set(recipientSessionId, {
     senderAlias,
     output: formattedOutput,
   });
 
-  log.info(LOG.MESSAGE, `Subagent output stored for caller (pending hook pickup)`, {
+  const storedClient = getStoredClient();
+
+  // TRULY ACTIVE CALLER: Also use noReply to inject message mid-stream
+  // Only use this path if caller is NOT idle AND NOT in session.before.idle hook
+  // The noReply allows the model to see the message on its next LLM call (if any)
+  if (!callerIsIdle && !callerInHook && storedClient) {
+    try {
+      const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
+
+      log.debug(LOG.MESSAGE, `Persisting visible subagent output for truly active caller`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+        agent: modelInfo?.agent,
+        modelID: modelInfo?.model?.modelID,
+      });
+
+      await storedClient.session.prompt({
+        path: { id: recipientSessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: 'text', text: formattedOutput }],
+          agent: modelInfo?.agent,
+          model: modelInfo?.model,
+        } as unknown as {
+          parts: Array<{ type: string; text: string }>;
+          noReply: boolean;
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
+        },
+      });
+
+      log.info(LOG.MESSAGE, `Persisted visible subagent output for truly active caller`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+      });
+
+      // Mark that noReply was used - hook should NOT also set resumePrompt
+      // (to avoid duplicate delivery)
+      noReplyDeliveredSessions.add(recipientSessionId);
+
+      // Also remove from pendingSubagentOutputs since noReply handled it
+      pendingSubagentOutputs.delete(recipientSessionId);
+
+      return true;
+    } catch (e) {
+      log.warn(LOG.MESSAGE, `Failed to persist visible message, pending will be used`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+        error: String(e),
+      });
+      // pendingSubagentOutputs already set, hook will handle it
+    }
+  }
+
+  // IDLE CALLER or CALLER IN HOOK: pendingSubagentOutputs is already set above
+  // The hook will pick it up:
+  // - If caller is idle: hook will fire on next activity
+  // - If caller is in hook: after waitForSessionIdle returns, hook checks pendingSubagentOutputs
+  log.info(LOG.MESSAGE, `Subagent output stored for hook pickup`, {
     recipientSessionId,
     recipientAlias,
     senderAlias,
+    reason: callerInHook ? 'caller_in_hook' : callerIsIdle ? 'caller_idle' : 'fallback',
   });
-
-  // NOTE: We don't need to manually resume here!
-  // The session.before.idle hook will fire when the caller's current iteration completes,
-  // and it will pick up the pendingSubagentOutputs and set resumePrompt.
-  // This works for both active and idle callers:
-  // - Active caller: hook fires after current iteration, picks up output, sets resumePrompt
-  // - Idle caller: session is already waiting, hook has already fired or will fire soon
-  //
-  // The key insight is that session.before.idle fires BEFORE the session completes,
-  // so we can always intercept and continue with resumePrompt.
 
   return true;
 }
