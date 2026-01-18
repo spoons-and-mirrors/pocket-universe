@@ -19,17 +19,20 @@ This ships with three tools creating a robust system for parallel agents to comm
 - **worktree** support for isolated agent workspaces (disabled by default)
 - **configurable** all tools work as standalone, can be enabled/disabled via config
 
-### TL:DR > 
+### TL:DR >
+
 Harness forks like Oh My Opencode should really run on top of this
 
 ### Installation
+
 Add Pocket Universe to your opencode config's plugin array
+
 ```json
 "plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
 ```
 
-
 ---
+
 <details>
 <summary>Diagram</summary>
     
@@ -61,6 +64,7 @@ sequenceDiagram
     A-->>Main: Finally completes
     Note over Main: Continues with full result
 ```
+
 </details>
 
 <details>
@@ -398,7 +402,7 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
     "subagent": true,
 
     // Enable the recall tool for querying agent history
-    "recall": true,
+    "recall": false,
   },
 
   // Tool configuration parameters
@@ -432,7 +436,7 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 | ----------- | ------- | ------------------------------------------------------ |
 | `broadcast` | `true`  | Enable the `broadcast` tool for inter-agent messaging  |
 | `subagent`  | `true`  | Enable the `subagent` tool for creating sibling agents |
-| `recall`    | `true`  | Enable the `recall` tool for querying agent history    |
+| `recall`    | `false` | Enable the `recall` tool for querying agent history    |
 
 **`parameters`**
 
