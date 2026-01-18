@@ -61,9 +61,14 @@ export function createHooks(client: OpenCodeSessionClient) {
 
   return {
     // Allow main session to wait for subagent grandchild sessions AND resumed sessions
-    'session.before_complete': async (
-      input: { sessionID: string; parentSessionID?: string },
-      output: { waitForSessions: string[]; resumePrompt?: string },
+    'session.before.idle': async (
+      input: {
+        sessionID: string;
+        parentSessionID?: string;
+        agent?: string;
+        model?: { providerID: string; modelID: string };
+      },
+      output: { resumePrompt?: string },
     ) => {
       const alias = sessionToAlias.get(input.sessionID) || 'unknown';
 
@@ -112,7 +117,7 @@ export function createHooks(client: OpenCodeSessionClient) {
           const subagentIds = Array.from(pending);
           log.info(
             LOG.SESSION,
-            `session.before_complete: waiting for subagents (iteration ${iteration})`,
+            `session.before.idle: waiting for subagents (iteration ${iteration})`,
             {
               sessionID: input.sessionID,
               alias,
@@ -142,7 +147,7 @@ export function createHooks(client: OpenCodeSessionClient) {
             callerPendingSubagents.delete(input.sessionID);
           }
 
-          log.info(LOG.SESSION, `session.before_complete: subagents checked`, {
+          log.info(LOG.SESSION, `session.before.idle: subagents checked`, {
             sessionID: input.sessionID,
             alias,
             totalSubagents: subagentIds.length,
@@ -163,7 +168,7 @@ export function createHooks(client: OpenCodeSessionClient) {
 
           log.info(
             LOG.SESSION,
-            `session.before_complete: has pending subagent output, setting resumePrompt`,
+            `session.before.idle: has pending subagent output, setting resumePrompt`,
             {
               sessionID: input.sessionID,
               alias,
@@ -176,7 +181,7 @@ export function createHooks(client: OpenCodeSessionClient) {
           // NOTE: This doesn't support model/agent fields, but it WORKS
           output.resumePrompt = pendingOutput.output;
 
-          log.info(LOG.SESSION, `session.before_complete: resumePrompt set, session will resume`, {
+          log.info(LOG.SESSION, `session.before.idle: resumePrompt set, session will resume`, {
             sessionID: input.sessionID,
             alias,
           });
@@ -192,7 +197,7 @@ export function createHooks(client: OpenCodeSessionClient) {
         if (unreadMessages.length > 0) {
           log.info(
             LOG.SESSION,
-            `session.before_complete: has unread messages, firing delayed prompt with model`,
+            `session.before.idle: has unread messages, firing delayed prompt with model`,
             {
               sessionID: input.sessionID,
               alias,
@@ -208,7 +213,7 @@ export function createHooks(client: OpenCodeSessionClient) {
           const modelInfo = await getOrFetchModelInfo(client, input.sessionID);
           const resumeText = resumeBroadcastPrompt(firstUnread.from);
 
-          log.debug(LOG.SESSION, `session.before_complete: using model info for unread messages`, {
+          log.debug(LOG.SESSION, `session.before.idle: using model info for unread messages`, {
             sessionID: input.sessionID,
             alias,
             agent: modelInfo?.agent,
@@ -248,7 +253,7 @@ export function createHooks(client: OpenCodeSessionClient) {
 
           log.info(
             LOG.SESSION,
-            `session.before_complete: scheduled delayed unread messages prompt, breaking loop`,
+            `session.before.idle: scheduled delayed unread messages prompt, breaking loop`,
             {
               sessionID: input.sessionID,
               alias,
@@ -261,7 +266,7 @@ export function createHooks(client: OpenCodeSessionClient) {
         }
 
         // Nothing pending - we're done
-        log.info(LOG.SESSION, `session.before_complete: all done`, {
+        log.info(LOG.SESSION, `session.before.idle: all done`, {
           sessionID: input.sessionID,
           alias,
           iterations: iteration,
@@ -652,7 +657,7 @@ export function createHooks(client: OpenCodeSessionClient) {
       const sessionId = lastUserMsg.info.sessionID;
 
       // Check for pending subagent outputs (user message mode - config false)
-      // These need to be injected immediately, not at session.before_complete
+      // These need to be injected immediately, not at session.before.idle
       const pendingOutput = pendingSubagentOutputs.get(sessionId);
       if (pendingOutput) {
         // Remove from map before injecting to prevent double-injection
@@ -713,7 +718,7 @@ export function createHooks(client: OpenCodeSessionClient) {
       // Only inject Pocket Universe broadcast/inbox for child sessions (those with parentID)
       if (!(await isChildSession(client, sessionId))) {
         // Main sessions receive a persisted SYNTHETIC Pocket Universe Summary when all work completes
-        // (injected via injectPocketUniverseSummaryToMain in session.before_complete)
+        // (injected via injectPocketUniverseSummaryToMain in session.before.idle)
         //
         // We ALSO inject an ephemeral synthetic tool call here as a "cover" message.
         // This is kept for compatibility with some providers that have issues with
