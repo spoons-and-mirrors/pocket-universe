@@ -25,7 +25,9 @@ export function subagentError(error: string): string {
 }
 
 export function formatSubagentOutput(alias: string, output: string): string {
-  return `[Subagent ${alias} completed]\n\n<agent_output from="${alias}">\n${output}\n</agent_output>`;
+  // Strip task_metadata section if present (internal metadata, not for user display)
+  const cleanOutput = output.replace(/\n*<task_metadata>[\s\S]*?<\/task_metadata>\n*/g, '').trim();
+  return `[${alias} completed]\n\n<output=${alias}>\n${cleanOutput}\n</output>`;
 }
 
 export function receivedSubagentOutput(alias: string, output: string): string {

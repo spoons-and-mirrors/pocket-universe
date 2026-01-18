@@ -134,11 +134,10 @@ export async function resumeSessionWithBroadcast(
 }
 
 /**
- * Store subagent output for the caller to pick up via session.before_complete.
- * This is used when subagent_result_forced_attention is false.
+ * Pipe subagent output to the caller session (forced_attention: false mode).
  *
- * When caller is ACTIVE: stores in pendingSubagentOutputs, session.before_complete fires prompt
- * When caller is IDLE: stores in pendingSubagentOutputs AND resumes the session
+ * When caller is ACTIVE: persist visible user message with noReply (caller sees it during iteration)
+ * When caller is IDLE: store in pendingSubagentOutputs, hook uses resumePrompt to resume
  */
 export async function resumeWithSubagentOutput(
   recipientSessionId: string,
@@ -162,8 +161,56 @@ export async function resumeWithSubagentOutput(
     outputLength: subagentOutput.length,
   });
 
-  // ALWAYS store in pendingSubagentOutputs for session.before_complete to pick up
-  // This ensures the caller processes the output when it finishes current work
+  const storedClient = getStoredClient();
+
+  // ACTIVE CALLER: Persist a visible user message with noReply
+  // This creates a new visible message in the TUI but doesn't trigger a new response
+  if (!callerIsIdle && storedClient) {
+    try {
+      const modelInfo = await getOrFetchModelInfo(storedClient, recipientSessionId);
+
+      log.debug(LOG.MESSAGE, `Persisting visible subagent output for active caller`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+        agent: modelInfo?.agent,
+        modelID: modelInfo?.model?.modelID,
+      });
+
+      await storedClient.session.prompt({
+        path: { id: recipientSessionId },
+        body: {
+          noReply: true,
+          parts: [{ type: 'text', text: formattedOutput }],
+          agent: modelInfo?.agent,
+          model: modelInfo?.model,
+        } as unknown as {
+          parts: Array<{ type: string; text: string }>;
+          noReply: boolean;
+          agent?: string;
+          model?: { modelID?: string; providerID?: string };
+        },
+      });
+
+      log.info(LOG.MESSAGE, `Persisted visible subagent output for active caller`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+      });
+
+      return true;
+    } catch (e) {
+      log.warn(LOG.MESSAGE, `Failed to persist visible message, falling back to pending`, {
+        recipientSessionId,
+        recipientAlias,
+        senderAlias,
+        error: String(e),
+      });
+      // Fall through to store in pendingSubagentOutputs
+    }
+  }
+
+  // IDLE CALLER (or fallback): Store for session.before.idle to pick up via resumePrompt
   pendingSubagentOutputs.set(recipientSessionId, {
     senderAlias,
     output: formattedOutput,
@@ -175,7 +222,7 @@ export async function resumeWithSubagentOutput(
     senderAlias,
   });
 
-  // If caller is idle, we need to resume the session so session.before_complete fires
+  // If caller is idle, we need to resume the session so session.before.idle fires
   if (callerIsIdle) {
     log.info(LOG.MESSAGE, `Caller is idle, resuming to process subagent output`, {
       recipientSessionId,
