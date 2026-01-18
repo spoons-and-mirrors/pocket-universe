@@ -6,7 +6,7 @@ Async agents can be powerful, but orchestration is at best finicky; they fire an
 
 This ships with three tools creating a robust system for parallel agents to communicate and coordinate work:
 
-- `broadcast` (async) is the messaging system, subagents can send or reply to others and update own status
+- `broadcast` is the messaging system, subagents can send or reply to others and update own status
 - `subagent` (async) creates a sibling subagent, the caller receives the output mid-stream (or resumes if idle)
 - `recall` allows access to subagents' status history, can also return subagent output (disabled by default)
 
