@@ -163,7 +163,7 @@ export function createHooks(client: OpenCodeSessionClient) {
 
           log.info(
             LOG.SESSION,
-            `session.before_complete: has pending subagent output, firing delayed prompt with model`,
+            `session.before_complete: has pending subagent output, setting resumePrompt`,
             {
               sessionID: input.sessionID,
               alias,
@@ -172,60 +172,17 @@ export function createHooks(client: OpenCodeSessionClient) {
             },
           );
 
-          // Get model info for the TARGET session (this session, not the sender)
-          const modelInfo = await getOrFetchModelInfo(client, input.sessionID);
+          // Use resumePrompt to actually resume the session
+          // NOTE: This doesn't support model/agent fields, but it WORKS
+          output.resumePrompt = pendingOutput.output;
 
-          log.debug(LOG.SESSION, `session.before_complete: using model info for subagent output`, {
+          log.info(LOG.SESSION, `session.before_complete: resumePrompt set, session will resume`, {
             sessionID: input.sessionID,
             alias,
-            agent: modelInfo?.agent,
-            modelID: modelInfo?.model?.modelID,
-            providerID: modelInfo?.model?.providerID,
           });
 
-          // WORKAROUND: OpenCode's resumePrompt doesn't support model/agent fields.
-          // Fire a delayed prompt with the correct model AFTER the hook returns.
-          const sessionIdToResume = input.sessionID;
-          const outputText = pendingOutput.output;
-          setImmediate(() => {
-            log.info(LOG.SESSION, `Firing delayed subagent output prompt with model`, {
-              sessionID: sessionIdToResume,
-              alias,
-            });
-            client.session
-              .prompt({
-                path: { id: sessionIdToResume },
-                body: {
-                  parts: [{ type: 'text', text: outputText }],
-                  agent: modelInfo?.agent,
-                  model: modelInfo?.model,
-                } as unknown as {
-                  parts: Array<{ type: string; text: string }>;
-                  agent?: string;
-                  model?: { modelID?: string; providerID?: string };
-                },
-              })
-              .catch((e: unknown) => {
-                log.error(LOG.SESSION, `Delayed subagent output prompt failed`, {
-                  sessionID: sessionIdToResume,
-                  alias,
-                  error: String(e),
-                });
-              });
-          });
-
-          log.info(
-            LOG.SESSION,
-            `session.before_complete: scheduled delayed subagent output prompt, breaking loop`,
-            {
-              sessionID: input.sessionID,
-              alias,
-            },
-          );
-
-          // Break out - we DON'T set resumePrompt, letting the session "complete".
-          // Our setImmediate will fire the prompt with correct model.
-          break;
+          // Continue the loop - after resume, we'll check again
+          continue;
         }
 
         // 3. Check for unread messages (may have been piped from completed spawns)
