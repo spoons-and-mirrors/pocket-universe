@@ -19,7 +19,7 @@ This ships with three tools creating a robust system for parallel agents to comm
 - **worktree** support for isolated agent workspaces (disabled by default)
 - **configurable** all tools work as standalone, can be enabled/disabled via config
 
-### TL:DR >
+### TL:DR
 
 Harness forks like Oh My Opencode should really run on top of this
 
