@@ -88,6 +88,15 @@ function stripJsonComments(content: string): string {
 }
 
 /**
+ * Strip trailing commas from JSON content (makes it valid JSON)
+ */
+function stripTrailingCommas(content: string): string {
+  // Remove trailing commas before } or ]
+  // This regex matches: comma, optional whitespace/newlines, then } or ]
+  return content.replace(/,\s*([}\]])/g, '$1');
+}
+
+/**
  * Find the config file to use (local takes priority over global)
  */
 function findConfigPath(): string | null {
@@ -150,7 +159,7 @@ function loadConfig(): PocketUniverseConfig {
 
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    const jsonContent = stripJsonComments(content);
+    const jsonContent = stripTrailingCommas(stripJsonComments(content));
     const parsed = JSON.parse(jsonContent);
 
     // Merge with defaults to ensure all fields exist
