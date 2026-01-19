@@ -49,8 +49,15 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
       // Check if this is the first broadcast call (agent announcing themselves)
       const isFirstCall = !announcedSessions.has(sessionId);
 
-      // Register if not already (should already be registered via system.transform)
-      registerSession(sessionId);
+      // Session should already be registered via system.transform hook
+      // If not registered, that's a bug - don't register without rootId or agent becomes invisible
+      if (!getAlias(sessionId)) {
+        log.warn(LOG.TOOL, `Session not registered - broadcast cannot continue`, {
+          sessionId,
+          hint: 'Session should be registered via system.transform hook before first broadcast',
+        });
+        return 'Internal error: Session not properly initialized. Please try again.';
+      }
 
       const alias = getAlias(sessionId);
 

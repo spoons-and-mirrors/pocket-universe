@@ -10,6 +10,7 @@ import {
   mainSessionCoordinator,
   getStoredClient,
   getOrFetchModelInfo,
+  sessionToRootId,
 } from '../state';
 import { sendUserMessageSent } from '../messaging/session-update';
 
@@ -156,6 +157,22 @@ export async function executePocketCommand(args: PocketCommandArgs): Promise<Poc
     return {
       success: false,
       message: `Agent '${target}' not found in current pocket.`,
+    };
+  }
+
+  // Safety: Check agent belongs to the current main session
+  // Main sessions are completely isolated - agents NEVER cross main sessions
+  const agentRootId = sessionToRootId.get(targetSessionId);
+  if (target && agentRootId !== mainSessionID) {
+    log.warn(LOG.MESSAGE, `/pocket failed - agent from different main session`, {
+      targetAlias,
+      targetSessionId,
+      agentRootId,
+      expectedMainSession: mainSessionID,
+    });
+    return {
+      success: false,
+      message: `Agent '${targetAlias}' belongs to a different session.`,
     };
   }
 

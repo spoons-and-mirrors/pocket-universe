@@ -15,6 +15,7 @@ import {
   MAX_INBOX_SIZE,
   getWorktree,
   sessionStates,
+  getRootIdForSession,
 } from '../state';
 import { isWorktreeEnabled } from '../config';
 
@@ -112,9 +113,16 @@ export function markMessagesAsPresented(sessionId: string, msgIndices: number[])
 
 export function getKnownAliases(sessionId: string): string[] {
   const selfAlias = sessionToAlias.get(sessionId);
+  const selfRootId = getRootIdForSession(sessionId);
   const agents: string[] = [];
-  for (const alias of aliasToSession.keys()) {
+  for (const [alias, sessId] of aliasToSession.entries()) {
     if (alias !== selfAlias) {
+      // Filter by root session - only include agents from the same main session
+      // Main sessions are completely isolated - agents NEVER cross main sessions
+      const agentRootId = getRootIdForSession(sessId);
+      if (selfRootId && agentRootId !== selfRootId) {
+        continue; // Different main session, skip
+      }
       agents.push(alias);
     }
   }
@@ -123,23 +131,32 @@ export function getKnownAliases(sessionId: string): string[] {
 
 export function getParallelAgents(sessionId: string): ParallelAgent[] {
   const selfAlias = sessionToAlias.get(sessionId);
+  const selfRootId = getRootIdForSession(sessionId);
   const agents: ParallelAgent[] = [];
   for (const [alias, sessId] of aliasToSession.entries()) {
-    // All registered sessions are child sessions (we check parentID before registering)
-    // Just exclude self
-    if (alias !== selfAlias) {
-      // Check if agent is idle (completed)
-      const state = sessionStates.get(sessId);
-      const isIdle = state?.status === 'idle';
-
-      agents.push({
-        alias,
-        description: getDescription(alias),
-        // Only include worktree if feature is enabled
-        worktree: isWorktreeEnabled() ? getWorktree(sessId) : undefined,
-        idle: isIdle || undefined, // Only include if true
-      });
+    // Exclude self
+    if (alias === selfAlias) {
+      continue;
     }
+
+    // Filter by root session - only include agents from the same main session
+    // Main sessions are completely isolated - agents NEVER cross main sessions
+    const agentRootId = getRootIdForSession(sessId);
+    if (selfRootId && agentRootId !== selfRootId) {
+      continue; // Different main session, skip
+    }
+
+    // Check if agent is idle (completed)
+    const state = sessionStates.get(sessId);
+    const isIdle = state?.status === 'idle';
+
+    agents.push({
+      alias,
+      description: getDescription(alias),
+      // Only include worktree if feature is enabled
+      worktree: isWorktreeEnabled() ? getWorktree(sessId) : undefined,
+      idle: isIdle || undefined, // Only include if true
+    });
   }
   return agents;
 }

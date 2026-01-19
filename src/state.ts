@@ -180,10 +180,21 @@ export function recallAgents(
   }
 
   // Then add active agents (not yet in history)
+  // Filter by main session - main sessions are completely isolated, agents NEVER cross them
+  const mainSessionId = getMainSessionId();
+
   for (const [alias, sessionId] of aliasToSession) {
     // Skip if already in history
     if (completedAgentHistory.some((r) => r.alias === alias)) continue;
     if (agentName && alias !== agentName) continue;
+
+    // Always filter by main session - agents from different main sessions must never be visible
+    if (mainSessionId) {
+      const agentRootId = sessionToRootId.get(sessionId);
+      if (agentRootId !== mainSessionId) {
+        continue; // Different main session (or untracked), skip
+      }
+    }
 
     const statusHistory = agentDescriptions.get(alias) || [];
     const sessionState = sessionStates.get(sessionId);
@@ -238,6 +249,18 @@ export const summaryInjectedSessions = new Set<string>();
 export const sessionToAlias = new Map<string, string>();
 export const aliasToSession = new Map<string, string>();
 export const agentDescriptions = new Map<string, string[]>(); // alias -> status history (most recent last)
+
+// Root session tracking: sessionId -> rootSessionId (main session)
+// Used to filter agents by pocket universe - only show agents from the same main session
+export const sessionToRootId = new Map<string, string>();
+
+/**
+ * Get the root session ID (main session) for a given session.
+ * Returns undefined if not tracked.
+ */
+export function getRootIdForSession(sessionId: string): string | undefined {
+  return sessionToRootId.get(sessionId);
+}
 
 // Atomic alias counter with registration lock
 // Per-root session naming counters (rootSessionId -> nextIndex)
@@ -670,6 +693,10 @@ export function registerSession(sessionId: string, rootId?: string): void {
       const alias = getNextAlias(rootId);
       sessionToAlias.set(sessionId, alias);
       aliasToSession.set(alias, sessionId);
+      // Track root session for pocket universe scoping
+      if (rootId) {
+        sessionToRootId.set(sessionId, rootId);
+      }
       log.info(LOG.SESSION, `Session registered`, {
         sessionId,
         alias,
@@ -713,6 +740,7 @@ export function cleanupCompletedAgents(): void {
     completedFirstLevelChildren: completedFirstLevelChildren.size,
     mainSessionCoordinator: mainSessionCoordinator.size,
     cleanedUpSessions: cleanedUpSessions.size,
+    sessionRootIds: sessionToRootId.size,
   };
 
   // Mark all current sessions as cleaned up BEFORE clearing
@@ -726,6 +754,7 @@ export function cleanupCompletedAgents(): void {
   sessionToAlias.clear();
   aliasToSession.clear();
   agentDescriptions.clear();
+  sessionToRootId.clear();
   inboxes.clear();
   sessionMsgCounter.clear();
   announcedSessions.clear();

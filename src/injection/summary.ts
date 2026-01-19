@@ -19,6 +19,7 @@ import {
   cleanupCompletedAgents,
   DEFAULT_MODEL_ID,
   DEFAULT_PROVIDER_ID,
+  sessionToRootId,
 } from '../state';
 import { isWorktreeEnabled } from '../config';
 
@@ -37,8 +38,9 @@ export function createSummaryCoverMessage(
     };
   }>,
 ): AssistantMessage | null {
-  // Generate the full summary
-  const summary = generatePocketUniverseSummary();
+  // Generate the full summary - pass sessionId as mainSessionId to filter agents
+  // When this is called, sessionId is the main session (we only call this for main sessions)
+  const summary = generatePocketUniverseSummary(sessionId);
   if (!summary) {
     return null;
   }
@@ -108,10 +110,14 @@ export function createSummaryCoverMessage(
  * Create a synthetic worktree summary for the main session.
  * Shows all active agent worktrees so main session knows where changes are.
  * Returns null if worktree feature is disabled.
+ * @param sessionId - The session ID to create the summary for
+ * @param baseUserMessage - The user message to base the synthetic message on
+ * @param mainSessionId - The main session ID to filter worktrees by (only include from this pocket)
  */
 export function createWorktreeSummaryMessage(
   sessionId: string,
   baseUserMessage: UserMessage,
+  mainSessionId?: string,
 ): AssistantMessage | null {
   // Return null if worktree feature is disabled
   if (!isWorktreeEnabled()) {
@@ -126,6 +132,15 @@ export function createWorktreeSummaryMessage(
   }> = [];
 
   for (const [sessId, worktreePath] of sessionWorktrees.entries()) {
+    // Filter by main session - only include worktrees from this main session
+    // Main sessions are completely isolated - agents NEVER cross main sessions
+    if (mainSessionId) {
+      const agentRootId = sessionToRootId.get(sessId);
+      if (agentRootId !== mainSessionId) {
+        continue; // Different main session (or untracked), skip
+      }
+    }
+
     const alias = sessionToAlias.get(sessId);
     if (alias && worktreePath) {
       worktreeInfo.push({
@@ -225,8 +240,9 @@ export function createWorktreeSummaryMessage(
  * Generate a Pocket Universe Summary for the main session.
  * This summarizes all agents, their status history, and worktree paths.
  * Called when all parallel work is complete, before returning to main session.
+ * @param mainSessionId - The main session ID to filter agents by (only include agents from this pocket)
  */
-export function generatePocketUniverseSummary(): string | null {
+export function generatePocketUniverseSummary(mainSessionId?: string): string | null {
   // Collect all agents from sessionToAlias
   // Note: Only child sessions (subagents) have aliases, so all entries are agents
   const agents: Array<{
@@ -236,6 +252,15 @@ export function generatePocketUniverseSummary(): string | null {
   }> = [];
 
   for (const [sessionId, alias] of sessionToAlias.entries()) {
+    // Filter by main session - only include agents from this main session
+    // Main sessions are completely isolated - agents NEVER cross main sessions
+    if (mainSessionId) {
+      const agentRootId = sessionToRootId.get(sessionId);
+      if (agentRootId !== mainSessionId) {
+        continue; // Different main session (or untracked), skip
+      }
+    }
+
     const statuses = agentDescriptions.get(alias) || [];
     const worktree = isWorktreeEnabled() ? sessionWorktrees.get(sessionId) : undefined;
 
@@ -287,7 +312,8 @@ export async function injectPocketUniverseSummaryToMain(mainSessionId: string): 
     return false;
   }
 
-  const summary = generatePocketUniverseSummary();
+  // Pass mainSessionId to filter agents to only those from this pocket universe
+  const summary = generatePocketUniverseSummary(mainSessionId);
   if (!summary) {
     log.info(LOG.SESSION, `No agents to summarize, skipping pocket universe summary`);
     return false;
