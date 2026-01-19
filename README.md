@@ -31,7 +31,9 @@ Add Pocket Universe to your opencode config's plugin array
 "plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
 ```
 
----
+### PENDING PR
+
+Needs this [opencode PR](https://github.com/anomalyco/opencode/pull/9272) merged to function correctly (namely session resumption and main thread blocking)
 
 <details>
 <summary>Diagram</summary>
