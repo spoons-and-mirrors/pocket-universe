@@ -153,6 +153,16 @@ export interface MessagesTransformOutput {
 
 /** Hook output for config.transform */
 export interface ConfigTransformOutput {
+  command?: Record<
+    string,
+    {
+      description?: string;
+      template: string;
+      agent?: string;
+      model?: string;
+      subtask?: boolean;
+    }
+  >;
   experimental?: {
     subagent_tools?: string[];
     [key: string]: unknown;

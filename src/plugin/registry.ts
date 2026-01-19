@@ -51,16 +51,25 @@ export function createRegistry(client: OpenCodeSessionClient) {
       });
     },
 
-    // Add broadcast, recall, and subagent to subagent_tools (based on config)
-    'experimental.config.transform': async (_input: unknown, output: ConfigTransformOutput) => {
-      const experimental = output.experimental ?? {};
+    // Register /pocket command and add tools to subagent_tools
+    config: async (input: ConfigTransformOutput) => {
+      // Register /pocket command
+      input.command ??= {};
+      input.command.pocket = {
+        description: 'Send a message to agents in the pocket universe',
+        template: '[ARGUMENTS]',
+      };
+      log.info(LOG.HOOK, `Registered /pocket command`);
+
+      // Add tools to subagent_tools
+      const experimental = input.experimental ?? {};
       const existingSubagentTools = experimental.subagent_tools ?? [];
       const toolsToAdd = [
         ...(isBroadcastEnabled() ? ['broadcast'] : []),
         ...(isRecallEnabled() ? ['recall'] : []),
         ...(isSubagentEnabled() ? ['subagent'] : []),
       ];
-      output.experimental = {
+      input.experimental = {
         ...experimental,
         subagent_tools: [...existingSubagentTools, ...toolsToAdd],
       };
