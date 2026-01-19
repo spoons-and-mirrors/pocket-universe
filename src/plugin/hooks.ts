@@ -67,8 +67,6 @@ export function createHooks(client: OpenCodeSessionClient) {
       input: {
         sessionID: string;
         parentSessionID?: string;
-        agent?: string;
-        model?: { providerID: string; modelID: string };
       },
       output: { resumePrompt?: string },
     ) => {

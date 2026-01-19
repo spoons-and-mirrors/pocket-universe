@@ -278,7 +278,7 @@ export function getConfigTemplate(): string {
     "subagent": true,
 
     // Enable the recall tool for querying agent history
-    "recall": true
+    "recall": false
   },
 
   // Tool configuration parameters
