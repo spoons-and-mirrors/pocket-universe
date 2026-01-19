@@ -10,11 +10,39 @@ import * as os from 'os';
 // Types
 // ============================================================================
 
+/** Session update configuration for broadcast events */
+export interface SessionUpdateBroadcastConfig {
+  /** Log status updates (broadcast without send_to) */
+  status_update: boolean;
+  /** Log messages sent to specific agents (broadcast with send_to) */
+  message_sent: boolean;
+}
+
+/** Session update configuration for subagent events */
+export interface SessionUpdateSubagentConfig {
+  /** Log when a subagent is spawned */
+  creation: boolean;
+  /** Log when a subagent completes */
+  completion: boolean;
+  /** Log when a session is resumed */
+  resumption: boolean;
+}
+
+/** Session update configuration */
+export interface SessionUpdateConfig {
+  /** Broadcast-related events */
+  broadcast: SessionUpdateBroadcastConfig;
+  /** Subagent-related events */
+  subagent: SessionUpdateSubagentConfig;
+}
+
 export interface PocketUniverseConfig {
   /** Enable isolated git worktrees for each agent (default: false) */
   worktree: boolean;
   /** Enable debug logging to .logs/pocket-universe.log (default: false) */
   logging: boolean;
+  /** Send ignored user messages to main session on agent events */
+  session_update: SessionUpdateConfig;
   /** Tool enablement flags */
   tools: {
     /** Enable the broadcast tool for inter-agent messaging (default: true) */
@@ -52,6 +80,17 @@ export interface PocketUniverseConfig {
 const DEFAULT_CONFIG: PocketUniverseConfig = {
   worktree: false,
   logging: false,
+  session_update: {
+    broadcast: {
+      status_update: false,
+      message_sent: false,
+    },
+    subagent: {
+      creation: false,
+      completion: false,
+      resumption: false,
+    },
+  },
   tools: {
     broadcast: true,
     subagent: true,
@@ -262,6 +301,48 @@ export function isRecallCrossPocket(): boolean {
 }
 
 /**
+ * Get session update config
+ */
+export function getSessionUpdateConfig(): SessionUpdateConfig {
+  return loadConfig().session_update;
+}
+
+/**
+ * Check if status update notifications are enabled
+ */
+export function isStatusUpdateEnabled(): boolean {
+  return loadConfig().session_update.broadcast.status_update;
+}
+
+/**
+ * Check if message sent notifications are enabled
+ */
+export function isMessageSentEnabled(): boolean {
+  return loadConfig().session_update.broadcast.message_sent;
+}
+
+/**
+ * Check if subagent creation notifications are enabled
+ */
+export function isSubagentCreationEnabled(): boolean {
+  return loadConfig().session_update.subagent.creation;
+}
+
+/**
+ * Check if subagent completion notifications are enabled
+ */
+export function isSubagentCompletionEnabled(): boolean {
+  return loadConfig().session_update.subagent.completion;
+}
+
+/**
+ * Check if session resumption notifications are enabled
+ */
+export function isSessionResumptionEnabled(): boolean {
+  return loadConfig().session_update.subagent.resumption;
+}
+
+/**
  * Get the config file path that was used (or would be used)
  */
 export function getConfigPath(): string | null {
@@ -278,38 +359,39 @@ export function getConfigPath(): string | null {
  */
 export function getConfigTemplate(): string {
   return `{
-  // Tool enablement flags
   "tools": {
-    // Enable the broadcast tool for inter-agent messaging
-    "broadcast": true,
-
-    // Enable the subagent tool for creating sibling agents
-    "subagent": true,
-
-    // Enable the recall tool for querying agent history
-    "recall": false
+    "broadcast": true, // inter-agent messaging
+    "subagent": true, // async, sibling subagents
+    "recall": false // query current and past subagents
   },
 
-  // Tool configuration parameters
   "parameters": {
-    // Max session depth allowed to spawn subagents (main session = 0)
-    "subagent_max_depth": 3,
-
     // When true (default), subagent results appear in broadcast inbox.
     // When false, subagent results are injected as persisted user message.
     "subagent_result_forced_attention": true,
-
-    // When true (default), recall can access agents from prior pocket universes.
-    // When false, recall only shows current pocket universe agents.
-    "recall_cross_pocket": true
+  
+    "subagent_max_depth": 3, // subagent max depth allowed (main session = 0)
+    "recall_cross_pocket": true // access prior pocket universe agents
   },
+
+  // Show pocket universe updates in main session
+  "session_update": {
+    "broadcast": {
+      "status_update": false,
+      "message_sent": false
+    },
+    "subagent": {
+      "creation": false,
+      "completion": false,
+      "resumption": false
+    }
+  },
+
+  "logging": false, // debug logs
 
   // Enable isolated git worktrees for each agent
   // Each agent gets its own clean checkout from HEAD
   "worktree": false,
-
-  // Enable debug logging to .logs/pocket-universe.log
-  "logging": false
 }
 `;
 }

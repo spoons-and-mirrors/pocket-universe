@@ -15,6 +15,7 @@ import {
   noReplyDeliveredSessions,
 } from '../state';
 import { getMessagesNeedingResume, markMessagesAsPresented } from './core';
+import { sendSessionResumed } from './session-update';
 
 /**
  * Resume an idle session by sending a broadcast message as a user prompt.
@@ -55,6 +56,11 @@ export async function resumeSessionWithBroadcast(
     log.info(LOG.MESSAGE, `Session resumed successfully`, {
       recipientSessionId,
       recipientAlias,
+    });
+
+    // Send session update to main session (if enabled)
+    sendSessionResumed(recipientAlias, senderAlias, 'broadcast').catch(() => {
+      // Ignore errors - this is a fire-and-forget notification
     });
 
     // Fire off the resume in the background but track its completion
@@ -167,6 +173,13 @@ export async function resumeWithSubagentOutput(
     callerInHook,
     outputLength: subagentOutput.length,
   });
+
+  // Send session update to main session (if enabled) - subagent completed triggers resume
+  if (!callerIsIdle && !callerInHook) {
+    sendSessionResumed(recipientAlias, senderAlias, 'subagent_output').catch(() => {
+      // Ignore errors - this is a fire-and-forget notification
+    });
+  }
 
   // ALWAYS store in pendingSubagentOutputs first (safety net for race conditions)
   // The hook will check this after waiting for subagents

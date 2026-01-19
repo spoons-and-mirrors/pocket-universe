@@ -28,6 +28,8 @@ import {
   markMessagesAsHandled,
   getKnownAliases,
   getParallelAgents,
+  sendStatusUpdate,
+  sendMessageSent,
 } from '../messaging';
 import { getParentId } from '../injection/index';
 export function createBroadcastTool(client: OpenCodeSessionClient) {
@@ -128,6 +130,11 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
           knownAgents,
         });
 
+        // Send session update to main session (if enabled)
+        sendStatusUpdate(alias, messageContent).catch(() => {
+          // Ignore errors - this is a fire-and-forget notification
+        });
+
         // Return early - no messages added to queue, no agents resumed
         return broadcastResult(alias, knownAgents, parallelAgents, undefined);
       } else {
@@ -195,17 +202,23 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
 
       for (let i = 0; i < recipientSessions.length; i++) {
         const recipientSessionId = recipientSessions[i];
+        const recipientAlias = validTargets[i];
         const recipientState = sessionStates.get(recipientSessionId);
 
         log.debug(LOG.TOOL, `Checking recipient state`, {
           recipientSessionId,
-          recipientAlias: validTargets[i],
+          recipientAlias,
           hasState: !!recipientState,
           status: recipientState?.status,
         });
 
         // Always store the message in inbox first
         sendMessage(alias, recipientSessionId, messageContent);
+
+        // Send session update to main session (if enabled)
+        sendMessageSent(alias, recipientAlias, messageContent).catch(() => {
+          // Ignore errors - this is a fire-and-forget notification
+        });
 
         // If recipient is idle, also resume the session
         if (recipientState?.status === 'idle') {
@@ -215,7 +228,7 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
             messageContent,
           );
           if (resumed) {
-            resumedSessions.push(validTargets[i]);
+            resumedSessions.push(recipientAlias);
           }
         }
       }

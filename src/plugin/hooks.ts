@@ -32,6 +32,7 @@ import {
   setWorktree,
   setCurrentPocketId,
   getCurrentPocketId,
+  setMainSessionId,
   getVirtualDepth,
   getOrFetchModelInfo,
   setStoredClientForHooks,
@@ -533,6 +534,7 @@ export function createHooks(client: OpenCodeSessionClient) {
           // Use the CHILD session ID as the pocket ID (unique per pocket universe)
           if (!getCurrentPocketId()) {
             setCurrentPocketId(sessionId);
+            setMainSessionId(parentId); // Track actual parent session for session updates
             log.info(LOG.HOOK, `Pocket universe started`, {
               mainSessionId: parentId,
               pocketId: sessionId,
@@ -681,10 +683,7 @@ export function createHooks(client: OpenCodeSessionClient) {
         // (injected via injectPocketUniverseSummaryToMain in session.before.idle)
         //
         // We ALSO inject an ephemeral synthetic tool call here as a "cover" message.
-        // This is kept for compatibility with some providers that have issues with
-        // consecutive user messages or need a tool result before the next user message.
-        // The cover message is ephemeral (not persisted) but provides visual feedback
-        // and ensures proper message ordering for all providers.
+        // This is kept for compatibility with some providers that would otherwise count this summary as a user message (credit).
         if (summaryInjectedSessions.has(sessionId)) {
           const coverMsg = createSummaryCoverMessage(sessionId, output.messages);
           if (coverMsg) {

@@ -35,6 +35,8 @@ import {
   resumeWithSubagentOutput,
   getMessagesNeedingResume,
   markMessagesAsPresented,
+  sendSubagentSpawned,
+  sendSubagentCompleted,
 } from '../messaging';
 import {
   getParentId,
@@ -226,6 +228,11 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           newDepth,
         });
 
+        // Send session update to main session (if enabled)
+        sendSubagentSpawned(callerAlias, newAlias, description).catch(() => {
+          // Ignore errors - this is a fire-and-forget notification
+        });
+
         // Inject task part into parent session BEFORE starting
         const subagentInfo: SubagentInfo = {
           sessionId: newSessionId,
@@ -323,6 +330,11 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
 
             // 1. Fetch the output from subagent session
             const subagentOutput = await fetchSubagentOutput(client, newSessionId, newAlias);
+
+            // 1.5. Send session update to main session (if enabled)
+            sendSubagentCompleted(newAlias).catch(() => {
+              // Ignore errors - this is a fire-and-forget notification
+            });
 
             // 2. Mark session as idle IMMEDIATELY after capturing output (before any delivery)
             sessionStates.set(newSessionId, {

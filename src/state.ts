@@ -57,13 +57,33 @@ export const completedAgentHistory: CompletedAgentRecord[] = [];
 // Track current pocket universe's main session ID
 let currentPocketId: string | null = null;
 
-export function setCurrentPocketId(mainSessionId: string): void {
-  currentPocketId = mainSessionId;
-  log.debug(LOG.SESSION, `Current pocket ID set`, { pocketId: mainSessionId });
+// Track the actual parent/main session ID (the user's session, not the first child)
+let currentMainSessionId: string | null = null;
+
+export function setCurrentPocketId(pocketSessionId: string): void {
+  currentPocketId = pocketSessionId;
+  log.debug(LOG.SESSION, `Current pocket ID set`, { pocketId: pocketSessionId });
 }
 
 export function getCurrentPocketId(): string | null {
   return currentPocketId;
+}
+
+/**
+ * Set the actual main session ID (user's session, parent of all agents).
+ * This is the session where ignored user messages should be sent for session updates.
+ */
+export function setMainSessionId(mainSessionId: string): void {
+  currentMainSessionId = mainSessionId;
+  log.debug(LOG.SESSION, `Main session ID set`, { mainSessionId });
+}
+
+/**
+ * Get the actual main session ID (user's session).
+ * Returns null if no pocket universe is active.
+ */
+export function getMainSessionId(): string | null {
+  return currentMainSessionId;
 }
 
 // Store final outputs for agents as they complete (used before saving to history)
@@ -727,6 +747,7 @@ export function cleanupCompletedAgents(): void {
 
   // Reset current pocket ID - next pocket universe gets a new one
   currentPocketId = null;
+  currentMainSessionId = null;
 
   // Note: We do NOT clear summaryInjectedSessions here
   // because that's used to track which main sessions got summaries
