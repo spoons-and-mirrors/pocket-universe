@@ -62,7 +62,7 @@ function formatUpdateMessage(event: SessionUpdateEvent, details: SessionUpdateDe
       return `[${timestamp}] [${details.agentAlias}] spawned ${details.newAgentAlias || 'unknown'}: ${details.taskDescription || 'no description'}`;
 
     case 'subagent_completed':
-      return `[${timestamp}] [${details.completedAgentAlias || 'unknown'}] completed`;
+      return `[${timestamp}] [${details.completedAgentAlias || 'unknown'}] idle`;
 
     case 'session_resumed':
       return `[${timestamp}] [${details.agentAlias}] resumed${details.resumedByAlias ? ` by ${details.resumedByAlias}` : ''}${details.resumeReason ? ` (${details.resumeReason})` : ''}`;
@@ -120,6 +120,7 @@ export async function sendMainSessionUpdate(
       path: { id: mainSessionId },
       body: {
         noReply: true,
+        hideQueueBadge: true,
         parts: [
           {
             type: 'text',
@@ -129,6 +130,7 @@ export async function sendMainSessionUpdate(
         ],
       } as unknown as {
         noReply: boolean;
+        hideQueueBadge: boolean;
         parts: Array<{ type: string; text: string; ignored?: boolean }>;
       },
     });
