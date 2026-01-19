@@ -9,6 +9,7 @@ import {
   isSubagentCreationEnabled,
   isSubagentCompletionEnabled,
   isSessionResumptionEnabled,
+  isUserMessageSentEnabled,
 } from '../config';
 import { getStoredClient, getMainSessionId } from '../state';
 
@@ -18,7 +19,8 @@ export type SessionUpdateEvent =
   | 'message_sent' // Broadcast with send_to (message to specific agent)
   | 'subagent_spawned' // Agent called subagent tool
   | 'subagent_completed' // Subagent finished its work
-  | 'session_resumed'; // Session was resumed after being idle
+  | 'session_resumed' // Session was resumed after being idle
+  | 'user_message_sent'; // User sent message via /pocket command
 
 export interface SessionUpdateDetails {
   // Common fields
@@ -42,6 +44,10 @@ export interface SessionUpdateDetails {
   // For session_resumed
   resumedByAlias?: string;
   resumeReason?: string;
+
+  // For user_message_sent
+  targetAlias?: string;
+  userMessagePreview?: string;
 }
 
 /**
@@ -66,6 +72,9 @@ function formatUpdateMessage(event: SessionUpdateEvent, details: SessionUpdateDe
 
     case 'session_resumed':
       return `[${timestamp}] [${details.agentAlias}] resumed${details.resumedByAlias ? ` by ${details.resumedByAlias}` : ''}${details.resumeReason ? ` (${details.resumeReason})` : ''}`;
+
+    case 'user_message_sent':
+      return `[${timestamp}] [user] -> [${details.targetAlias || 'unknown'}]: ${details.userMessagePreview || ''}`;
 
     default:
       return `[${timestamp}] [${details.agentAlias}] ${event}`;
@@ -203,5 +212,14 @@ export function sendMessageSent(
     agentAlias: senderAlias,
     recipientAlias,
     messagePreview,
+  });
+}
+
+export function sendUserMessageSent(targetAlias: string, messagePreview: string): Promise<boolean> {
+  if (!isUserMessageSentEnabled()) return Promise.resolve(false);
+  return sendMainSessionUpdate('user_message_sent', {
+    agentAlias: 'user',
+    targetAlias,
+    userMessagePreview: messagePreview,
   });
 }

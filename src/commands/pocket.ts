@@ -11,6 +11,7 @@ import {
   getStoredClient,
   getOrFetchModelInfo,
 } from '../state';
+import { sendUserMessageSent } from '../messaging/session-update';
 
 // ============================================================================
 // Types
@@ -217,6 +218,9 @@ export async function executePocketCommand(args: PocketCommandArgs): Promise<Poc
       targetSessionId,
       messageLength: message.length,
     });
+
+    // Send session update notification
+    sendUserMessageSent(targetAlias, message);
 
     return {
       success: true,

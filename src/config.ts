@@ -28,12 +28,20 @@ export interface SessionUpdateSubagentConfig {
   resumption: boolean;
 }
 
+/** Session update configuration for user /pocket command */
+export interface SessionUpdateUserConfig {
+  /** Log when user sends a message to an agent via /pocket */
+  message_sent: boolean;
+}
+
 /** Session update configuration */
 export interface SessionUpdateConfig {
   /** Broadcast-related events */
   broadcast: SessionUpdateBroadcastConfig;
   /** Subagent-related events */
   subagent: SessionUpdateSubagentConfig;
+  /** User /pocket command events */
+  user: SessionUpdateUserConfig;
 }
 
 export interface PocketUniverseConfig {
@@ -89,6 +97,9 @@ const DEFAULT_CONFIG: PocketUniverseConfig = {
       creation: false,
       completion: false,
       resumption: false,
+    },
+    user: {
+      message_sent: false,
     },
   },
   tools: {
@@ -343,6 +354,13 @@ export function isSessionResumptionEnabled(): boolean {
 }
 
 /**
+ * Check if user message sent notifications are enabled
+ */
+export function isUserMessageSentEnabled(): boolean {
+  return loadConfig().session_update.user.message_sent;
+}
+
+/**
  * Get the config file path that was used (or would be used)
  */
 export function getConfigPath(): string | null {
@@ -384,6 +402,9 @@ export function getConfigTemplate(): string {
       "creation": true,
       "completion": true,
       "resumption": true
+    },
+    "user": {
+      "message_sent": true
     }
   },
 
