@@ -377,13 +377,13 @@ export function getConfigTemplate(): string {
   // Show pocket universe updates in main session
   "session_update": {
     "broadcast": {
-      "status_update": false,
-      "message_sent": false
+      "status_update": true,
+      "message_sent": true
     },
     "subagent": {
-      "creation": false,
-      "completion": false,
-      "resumption": false
+      "creation": true,
+      "completion": true,
+      "resumption": true
     }
   },
 
