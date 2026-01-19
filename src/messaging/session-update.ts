@@ -55,12 +55,7 @@ function formatUpdateMessage(event: SessionUpdateEvent, details: SessionUpdateDe
       return `[${timestamp}] [${details.agentAlias}] status: ${details.status || 'unknown'}`;
 
     case 'message_sent':
-      const preview = details.messagePreview
-        ? details.messagePreview.length > 60
-          ? details.messagePreview.substring(0, 60) + '...'
-          : details.messagePreview
-        : '';
-      return `[${timestamp}] [${details.agentAlias}] -> [${details.recipientAlias}]: ${preview}`;
+      return `[${timestamp}] [${details.agentAlias}] -> [${details.recipientAlias}]: ${details.messagePreview || ''}`;
 
     case 'subagent_spawned':
       return `[${timestamp}] [${details.agentAlias}] spawned ${details.newAgentAlias || 'unknown'}: ${details.taskDescription || 'no description'}`;
