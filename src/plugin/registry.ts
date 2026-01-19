@@ -1,5 +1,5 @@
 import { log, LOG } from '../logger';
-import type { OpenCodeSessionClient, ConfigTransformOutput } from '../types';
+import type { OpenCodeSessionClient, ConfigTransformOutput, Part } from '../types';
 import { createBroadcastTool, createSubagentTool, createRecallTool } from '../tools/index';
 import { isBroadcastEnabled, isSubagentEnabled, isRecallEnabled } from '../config';
 import { parsePocketCommand, executePocketCommand } from '../commands/index';
@@ -18,7 +18,7 @@ export function createRegistry(client: OpenCodeSessionClient) {
     // Intercept /pocket command before execution
     'command.execute.before': async (
       input: { command: string; sessionID: string; arguments: string },
-      output: { parts: unknown[] },
+      output: { parts: Part[] },
     ) => {
       if (input.command !== 'pocket') {
         return; // Not our command, let it pass through
