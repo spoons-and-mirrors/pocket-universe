@@ -1,18 +1,18 @@
-# Pocket Universe
+# Pocket Universe [WIP]
 
 ## An agentic closed loop with async capabilities
 
-Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This plugin extends the native opencode subagent paradigm to provide: closed loop, resilient, async agents, blocking main thread execution. A _"pocket universe"_.
+Async agents can be powerful, but orchestration is at best finicky; they fire and _forget_, orphan work, lose context, waste time... and tokens. This plugin extends the native opencode subagent paradigm to provide **closed loop, resilient, async agents, blocking main thread execution**. A _"pocket universe"_.
 
-This ships with three tools creating a robust system for parallel agents to communicate and coordinate work:
+This ships with three tools creating a robust system for parallel agents to communicate and coordinate work
 
 - `broadcast` is the _live_ messaging system, subagents can send or reply to others and update own status
-- `subagent` (async) creates a sibling subagent, the caller receives the output mid-stream (or resumes if idle)
-- `recall` allows access to subagents' status history, can also return subagent output (disabled by default)
+- `subagent` (async) creates a sibling subagent, caller receives the output mid-stream, or resumes if idle
+- `recall` allows access to current and past subagents' status history and result output, disabled by default
 
 ### Key Features
 
-- **attention** is all they need, agents are accutely aware each other
+- **attention** is all they need, agents are made acutely aware of each other
 - **resume** idle agents upon receiving a `broadcast` or `subagent` result
 - **block** main session until all subagents in the _pocket universe_ complete
 - **depth** control to limit runaway subagent spawning
@@ -21,7 +21,7 @@ This ships with three tools creating a robust system for parallel agents to comm
 
 ### TL:DR
 
-Harness forks like Oh My Opencode should really run on top of this
+Harness forks such as Oh My Opencode should really run on top of this
 
 ### Installation
 
@@ -33,7 +33,7 @@ Add Pocket Universe to your opencode config's plugin array
 
 ### PENDING PR
 
-Needs this [opencode PR](https://github.com/anomalyco/opencode/pull/9272) merged to function correctly (namely session resumption and main thread blocking)
+Needs this [opencode PR](https://github.com/anomalyco/opencode/pull/9272) merged to function correctly (namely session resumption and main thread blocking) and [this one](https://github.com/anomalyco/opencode/pull/7725) for properly scoping tools to subagents only.
 
 <details>
 <summary>Diagram</summary>
