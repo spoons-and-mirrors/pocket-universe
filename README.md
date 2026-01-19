@@ -7,22 +7,26 @@ Async agents can be powerful, but orchestration is at best finicky; they fire an
 This ships with three tools creating a robust system for parallel agents to communicate and coordinate work
 
 - `broadcast` is the _live_ messaging system, subagents can send or reply to others and update own status
-- `subagent` (async) creates a sibling subagent, caller receives the output mid-stream, or resumes if idle
-- `recall` allows access to current and past subagents' status history and result output, disabled by default
+- `subagent` spawns an **async** agent. `subagent` output is sent back to the caller, which resumes if idle
+- `recall` allows access to current and past subagents' status history and results, disabled by default
+
+Every `broadcast` messages or `subagent` results are piped to the proper recipient **as they happen**
 
 ### Key Features
 
 - **attention** is all they need, agents are made acutely aware of each other
-- **resume** idle agents upon receiving a `broadcast` or `subagent` result
 - **message** any subagents directly with `/pocket @agentX message`
+- **resume** idle agents on `subagent` result, `broadcast` or `/pocket` message
 - **block** main session until all subagents in the _pocket universe_ complete
+- **tools** are configurable and work standalone or together
 - **depth** control to limit runaway subagent spawning
 - **worktree** support for isolated agent workspaces (disabled by default)
-- **configurable** all tools work as standalone, can be enabled/disabled via config
 
-### TL:DR
+Perfectly suited for personnal use, you don't need to build crazy machinery on top of it to make it work. That being said, harness mods such as Oh My Opencode would benefit from using this under the hood.
 
-Harness forks such as Oh My Opencode should really run on top of this
+### PENDING PR
+
+Needs this [opencode PR](https://github.com/anomalyco/opencode/pull/9272) merged to function correctly (namely async subagents, session resumption, main thread block) and [this one](https://github.com/anomalyco/opencode/pull/7725) for properly scoping tools to subagents only.
 
 ### Installation
 
@@ -32,43 +36,8 @@ Add Pocket Universe to your opencode config's plugin array
 "plugin": ["@spoons-and-mirrors/pocket-universe@latest"]
 ```
 
-### PENDING PR
-
-Needs this [opencode PR](https://github.com/anomalyco/opencode/pull/9272) merged to function correctly (namely session resumption and main thread blocking) and [this one](https://github.com/anomalyco/opencode/pull/7725) for properly scoping tools to subagents only.
-
 <details>
-<summary>Diagram</summary>
-    
-### How It Works
-
-```mermaid
-sequenceDiagram
-    participant Main as Main Session
-    participant A as AgentA
-    participant B as AgentB (subagent)
-
-    Main->>A: task tool
-    Note over A: AgentA starts work
-
-    A->>B: subagent(prompt="...")
-    Note over A: Returns immediately (fire-and-forget)
-    Note over B: AgentB works in parallel
-
-    A->>A: Continues own work
-    A->>A: Finishes, about to complete
-
-    Note over A: Waits for agentB...
-
-    B-->>A: Completes, output piped as message
-    Note over A: Unread message detected
-    A->>A: Session resumed automatically
-    Note over A: Processes agentB's output
-
-    A-->>Main: Finally completes
-    Note over Main: Continues with full result
-```
-
-</details>
+<summary>Features Documentation</summary>
 
 <details>
 <summary>Tools</summary>
@@ -157,230 +126,28 @@ recall(agent_name="agentA", show_output=true)   # Include agent's final output
 <details>
 <summary>Commands</summary>
 
-### `/pocket` — Send messages to agents
+### The `/pocket` command
 
-While a pocket universe is running, you can send messages directly to agents from the main session:
+While a pocket universe is running, you can send messages directly to any of its agent.
+You don't need to create the `/pocket` command file, it is registered automatically
 
 ```
 /pocket @agentB wrap it up       → sends to agentB specifically
-/pocket wrap it up               → sends to coordinator (first agent)
+/pocket wrap it up               → sends to first subagent of the pocket
 ```
 
-**Setup:**
-
-Copy the command template to your OpenCode commands directory:
-
-```bash
-# Global (works everywhere)
-cp ~/.config/opencode/plugin/pocket-universe/command/pocket.md ~/.opencode/command/pocket.md
-
-# Or project-local
-cp ~/.config/opencode/plugin/pocket-universe/command/pocket.md .opencode/command/pocket.md
-```
-
-**Behavior:**
+**Behavior**
 
 - Message sender appears as `"user"` so agents know it came from you
 - If the target agent is idle, it will be resumed automatically
-- Only works when a pocket universe is active (agents are running)
-
-**Safety:**
-
 - Cannot message agents from previous pockets (already completed)
 - Returns an error if no pocket is currently active
 - Returns an error if the specified agent doesn't exist
 
-**Use cases:**
+**Examples**
 
-- Give agents mid-task instructions: `/pocket @agentB also add unit tests`
-- Redirect work: `/pocket @agentA hand off the API work to agentB`
-- Signal urgency: `/pocket wrap it up, we need to ship`
-
-</details>
-
-<details>
-<summary>Session Lifecycle</summary>
-
-```mermaid
-flowchart TD
-    A[Agent finishes work] --> B{Has pending subagents?}
-    B -->|Yes| C[Wait for subagents to complete]
-    C --> D[Subagents pipe output as messages]
-    D --> E{Has unread messages?}
-    B -->|No| E
-    E -->|Yes| F[Resume session]
-    F --> G[Agent processes messages]
-    G --> A
-    E -->|No| H[Session completes]
-    H --> I[Main continues]
-```
-
-The `session.before_complete` hook ensures no work is left behind:
-
-1. Agent finishes its work
-2. Hook checks for pending subagents → waits for them
-3. Subagents pipe output to caller as messages
-4. Hook checks for unread messages → resumes session
-5. Agent processes messages, hook fires again
-6. Only when nothing pending does the session complete
-7. Main session continues with the complete result
-
-</details>
-
-<details>
-<summary>Session Resumption</summary>
-
-Idle agents automatically wake up when they receive messages:
-
-```mermaid
-sequenceDiagram
-    participant A as AgentA
-    participant B as AgentB
-
-    A->>A: Completes task, goes idle
-
-    B->>A: broadcast(send_to="agentA", message="Question?")
-    Note over A: Message arrives while idle
-
-    A->>A: Resumed automatically
-    Note over A: Sees message in inbox
-
-    A->>B: broadcast(reply_to=1, message="Answer!")
-```
-
-</details>
-
-<details>
-<summary>Receiving Messages</summary>
-
-Messages appear as synthetic `broadcast` tool results:
-
-```json
-{
-  "tool": "broadcast",
-  "state": {
-    "input": { "synthetic": true },
-    "output": {
-      "you_are": "agentB",
-      "agents": [
-        {
-          "name": "agentA",
-          "status": ["searching for X", "found X in file.ts"],
-          "idle": true
-        }
-      ],
-      "messages": [{ "id": 1, "from": "agentA", "content": "Need help?" }]
-    }
-  }
-}
-```
-
-- **`synthetic: true`** — Injected by Pocket Universe, not a real tool call
-- **`you_are`** — Your agent name (always included so you know your identity)
-- **`agents`** — All sibling agents and their status history (array of status updates)
-- **`idle`** — True if the agent has completed and is no longer active
-- **`messages`** — Inbox messages, reply using `reply_to`
-
-**Reply audit trail:** When you reply using `reply_to`, the tool output includes the FULL original message you're replying to, providing a complete audit trail.
-
-</details>
-
-<details>
-<summary>Pocket Universe Summary</summary>
-
-When all parallel agent work completes, the main session receives a **Pocket Universe Summary** as a persisted user message. This includes:
-
-- All agents that ran
-- Their full status history
-- Their worktree paths (if enabled)
-
-Example summary:
-
-```
-[Pocket Universe Summary]
-
-The following agents completed their work:
-
-## agentA
-Worktree: /repo/.worktrees/agentA
-Status history:
-  → searching for auth implementation
-  → found auth in src/auth.ts
-  → sending findings to agentB
-
-## agentB
-Worktree: /repo/.worktrees/agentB
-Status history:
-  → implementing login form
-  → integrating auth from agentA
-  → completed login feature
-
-Note: Agent changes are preserved in their worktrees. Review and merge as needed.
-```
-
-This summary is **persisted to the database** so it survives crashes and is part of the conversation history.
-
-**Automatic cleanup:** After the summary is injected, all agent tracking state is cleared. This means the next batch of tasks starts fresh — no stale agents from previous work appear in `getParallelAgents()`.
-
-**Parallel task handling:** If the main session spawns multiple task tools in parallel (e.g., `task(agentA)` and `task(agentB)` simultaneously), the summary is only injected after ALL first-level children complete. This ensures the summary contains work from all agents, not just the first one to finish.
-
-</details>
-
-<details>
-<summary>Isolated Worktrees</summary>
-
-Each agent operates in its own **git worktree** — a clean checkout from the last commit (HEAD). This provides isolation so agents can work in parallel without conflicting with each other.
-
-### How It Works
-
-```
-repo/
-├── .worktrees/
-│   ├── agentA/     ← agentA's isolated working directory
-│   ├── agentB/     ← agentB's isolated working directory
-│   └── agentC/     ← agentC's isolated working directory
-└── (main repo)     ← main session's working directory
-```
-
-When an agent is created (via `task` or `subagent`):
-
-1. A new worktree is created at `.worktrees/<alias>` (detached from HEAD)
-2. The agent sees its worktree path in its system prompt
-3. All sibling agents can see each other's worktree paths via `broadcast`
-
-### Agent System Prompt
-
-Each agent receives its worktree path:
-
-```xml
-<worktree>
-Your isolated working directory: /repo/.worktrees/agentB
-ALL file operations (read, write, edit, bash) should use paths within this directory.
-Do NOT modify files outside this worktree.
-</worktree>
-```
-
-### Broadcast Shows Worktrees
-
-When agents see each other via broadcast, worktree paths are included so they know where each agent is working.
-
-### Worktree Paths in Summary
-
-The main session’s Pocket Universe Summary includes each agent’s worktree path when worktrees are enabled.
-
-### Worktree Lifecycle
-
-| Event                 | Behavior                                           |
-| --------------------- | -------------------------------------------------- |
-| Agent created         | Worktree created at `.worktrees/<alias>` from HEAD |
-| Agent completes       | **Worktree preserved** with all changes            |
-| Stale worktree exists | Automatically cleaned up before creating new one   |
-
-**Important:** Worktrees are **not deleted** when agents complete. The agent's changes are preserved for you to review and merge manually.
-
-### Limitations
-
-Worktree isolation relies on agents following instructions to use their assigned paths. The LLM may occasionally write to the wrong location. For guaranteed isolation, OpenCode core changes would be needed (per-session working directory).
+- Give agents mid-task instructions: `/pocket @agentB also add unit tests please`
+- Redirect work: `/pocket @agentA hand off the API work to agentB when it's done, thanks!`
 
 </details>
 
@@ -455,5 +222,230 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 | ---------- | ------- | ----------------------------------------------- |
 | `worktree` | `false` | Create isolated git worktrees for each agent    |
 | `logging`  | `false` | Write debug logs to `.logs/pocket-universe.log` |
+
+</details>
+
+<details>
+<summary>Worktrees</summary>
+
+Each agent operates in its own **git worktree** — a clean checkout from the last commit (HEAD). This provides isolation so agents can work in parallel without conflicting with each other.
+
+### How It Works
+
+```
+repo/
+├── .worktrees/
+│   ├── agentA/     ← agentA's isolated working directory
+│   ├── agentB/     ← agentB's isolated working directory
+│   └── agentC/     ← agentC's isolated working directory
+└── (main repo)     ← main session's working directory
+```
+
+When an agent is created (via `task` or `subagent`):
+
+1. A new worktree is created at `.worktrees/<alias>` (detached from HEAD)
+2. The agent sees its worktree path in its system prompt
+3. All sibling agents can see each other's worktree paths via `broadcast`
+
+### Agent System Prompt
+
+Each agent receives its worktree path:
+
+```xml
+<worktree>
+Your isolated working directory: /repo/.worktrees/agentB
+ALL file operations (read, write, edit, bash) should use paths within this directory.
+Do NOT modify files outside this worktree.
+</worktree>
+```
+
+### Broadcast Shows Worktrees
+
+When agents see each other via broadcast, worktree paths are included so they know where each agent is working.
+
+### Worktree Paths in Summary
+
+The main session’s Pocket Universe Summary includes each agent’s worktree path when worktrees are enabled.
+
+### Worktree Lifecycle
+
+| Event                 | Behavior                                           |
+| --------------------- | -------------------------------------------------- |
+| Agent created         | Worktree created at `.worktrees/<alias>` from HEAD |
+| Agent completes       | **Worktree preserved** with all changes            |
+| Stale worktree exists | Automatically cleaned up before creating new one   |
+
+**Important:** Worktrees are **not deleted** when agents complete. The agent's changes are preserved for you to review and merge manually.
+
+### Limitations
+
+Worktree isolation relies on agents following instructions to use their assigned paths. The LLM may occasionally write to the wrong location. For guaranteed isolation, OpenCode core changes would be needed (per-session working directory).
+
+</details>
+
+</details>
+
+<details>
+<summary>Technical Documentation</summary>
+
+<details>
+<summary>Diagrams</summary>
+    
+<details>
+<summary>How it works</summary>
+
+```mermaid
+sequenceDiagram
+    participant Main as Main Session
+    participant A as AgentA
+    participant B as AgentB (subagent)
+
+    Main->>A: task tool
+    Note over A: AgentA starts work
+
+    A->>B: subagent(prompt="...")
+    Note over A: Returns immediately (fire-and-forget)
+    Note over B: AgentB works in parallel
+
+    A->>A: Continues own work
+    A->>A: Finishes, about to complete
+
+    Note over A: Waits for agentB...
+
+    B-->>A: Completes, output piped as message
+    Note over A: Unread message detected
+    A->>A: Session resumed automatically
+    Note over A: Processes agentB's output
+
+    A-->>Main: Finally completes
+    Note over Main: Continues with full result
+```
+
+</details>
+
+<details>
+<summary>Session Lifecycle</summary>
+
+```mermaid
+flowchart TD
+    A[Agent finishes work] --> B{Has pending subagents?}
+    B -->|Yes| C[Wait for subagents to complete]
+    C --> D[Subagents pipe output as messages]
+    D --> E{Has unread messages?}
+    B -->|No| E
+    E -->|Yes| F[Resume session]
+    F --> G[Agent processes messages]
+    G --> A
+    E -->|No| H[Session completes]
+    H --> I[Main continues]
+```
+
+The `session.before_complete` hook ensures no work is left behind:
+
+1. Agent finishes its work
+2. Hook checks for pending subagents → waits for them
+3. Subagents pipe output to caller as messages
+4. Hook checks for unread messages → resumes session
+5. Agent processes messages, hook fires again
+6. Only when nothing pending does the session complete
+7. Main session continues with the complete result
+</details>
+
+<details>
+<summary>Session Resumption</summary>
+
+Idle agents automatically wake up when they receive messages:
+
+```mermaid
+sequenceDiagram
+    participant A as AgentA
+    participant B as AgentB
+
+    A->>A: Completes task, goes idle
+
+    B->>A: broadcast(send_to="agentA", message="Question?")
+    Note over A: Message arrives while idle
+
+    A->>A: Resumed automatically
+    Note over A: Sees message in inbox
+
+    A->>B: broadcast(reply_to=1, message="Answer!")
+```
+
+</details>
+</details>
+<details>
+<summary>`broadcast` System</summary>
+
+Messages appear as synthetic `broadcast` tool results:
+
+```json
+{
+  "tool": "broadcast",
+  "state": {
+    "input": { "synthetic": true },
+    "output": {
+      "you_are": "agentB",
+      "agents": [
+        {
+          "name": "agentA",
+          "status": ["searching for X", "found X in file.ts"],
+          "idle": true
+        }
+      ],
+      "messages": [{ "id": 1, "from": "agentA", "content": "Need help?" }]
+    }
+  }
+}
+```
+
+- **`synthetic: true`** — Injected by Pocket Universe, not a real tool call
+- **`you_are`** — Your agent name (always included so you know your identity)
+- **`agents`** — All sibling agents and their status history (array of status updates)
+- **`idle`** — True if the agent has completed and is no longer active
+- **`messages`** — Inbox messages, reply using `reply_to`
+
+**Reply audit trail:** When you reply using `reply_to`, the tool output includes the FULL original message you're replying to, providing a complete audit trail.
+
+</details>
+
+<details>
+<summary>Pocket Universe Summary</summary>
+
+When all parallel agent work completes, the main session receives a **Pocket Universe Summary** as a persisted user message. This includes:
+
+- All agents that ran
+- Their full status history
+- Their worktree paths (if enabled)
+
+Example summary:
+
+```
+[Pocket Universe Summary]
+
+The following agents completed their work:
+
+## agentA
+Worktree: /repo/.worktrees/agentA
+Status history:
+  → searching for auth implementation
+  → found auth in src/auth.ts
+  → sending findings to agentB
+
+## agentB
+Worktree: /repo/.worktrees/agentB
+Status history:
+  → implementing login form
+  → integrating auth from agentA
+  → completed login feature
+
+Note: Agent changes are preserved in their worktrees. Review and merge as needed.
+```
+
+This summary is **persisted to the database** so it survives crashes and is part of the conversation history.
+
+**Automatic cleanup:** After the summary is injected, all agent tracking state is cleared. This means the next batch of tasks starts fresh — no stale agents from previous work appear in `getParallelAgents()`.
+
+**Parallel task handling:** If the main session spawns multiple task tools in parallel (e.g., `task(agentA)` and `task(agentB)` simultaneously), the summary is only injected after ALL first-level children complete. This ensures the summary contains work from all agents, not just the first one to finish.
 
 </details>
