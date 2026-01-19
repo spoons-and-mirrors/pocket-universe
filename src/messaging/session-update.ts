@@ -48,7 +48,8 @@ export interface SessionUpdateDetails {
  * Format the session update message for display
  */
 function formatUpdateMessage(event: SessionUpdateEvent, details: SessionUpdateDetails): string {
-  const timestamp = new Date(details.timestamp || Date.now()).toISOString().slice(11, 19);
+  const date = new Date(details.timestamp || Date.now());
+  const timestamp = `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}:${date.getSeconds().toString().padStart(2, '0')}`;
 
   switch (event) {
     case 'status_update':
