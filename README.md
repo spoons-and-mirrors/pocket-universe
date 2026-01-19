@@ -15,6 +15,7 @@ This ships with three tools creating a robust system for parallel agents to comm
 - **attention** is all they need, agents are made acutely aware of each other
 - **resume** idle agents upon receiving a `broadcast` or `subagent` result
 - **block** main session until all subagents in the _pocket universe_ complete
+- **allow** user to message subagents directly via `/pocket` command
 - **depth** control to limit runaway subagent spawning
 - **worktree** support for isolated agent workspaces (disabled by default)
 - **configurable** all tools work as standalone, can be enabled/disabled via config
