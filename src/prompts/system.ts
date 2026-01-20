@@ -1,3 +1,23 @@
+// =============================================================================
+// System prompt for Pocket Universe
+// =============================================================================
+//
+// This file contains the FULL system prompt as a single readable template.
+// Sections are marked with {{condition}}...{{condition}} tags.
+// The parser strips sections where the condition is false.
+//
+// Conditions:
+//   {{broadcast}}         - broadcast tool enabled
+//   {{worktree}}          - worktree isolation enabled
+//   {{subagent}}          - subagent tool enabled
+//   {{recall}}            - recall tool enabled
+//   {{max_depth_reached}} - at max subagent depth (can't spawn more)
+//
+// Placeholders:
+//   {{WORKTREE_PATH}}     - replaced with actual worktree path
+//
+// =============================================================================
+
 import {
   isBroadcastEnabled,
   isWorktreeEnabled,
@@ -6,153 +26,159 @@ import {
 } from '../config';
 
 // =============================================================================
-// System prompt injection
-// =============================================================================
-
-// =============================================================================
-// Conditional Sections
-// =============================================================================
-
-const SECTION_SUBAGENT_INTRO = 'Use `subagent` to create new sibling agents for parallel work.';
-
-const SECTION_SUBAGENT_MAX_DEPTH = (depth?: number, maxDepth?: number) => {
-  if (depth && maxDepth) {
-    return `You have reached the maximum subagent depth (${depth}/${maxDepth}) and cannot call \`subagent\` from this session.`;
-  }
-  return 'You have reached the maximum subagent depth and cannot call `subagent` from this session.';
-};
-
-const SECTION_WORKTREE = `
-## Isolated Worktrees
-Each agent operates in its own isolated git worktree - a clean checkout from the last commit.
-- Your worktree path is shown in your system prompt (if available)
-- **ALL file operations should use paths relative to or within your worktree**
-- Do NOT modify files outside your assigned worktree
-- Other agents have their own worktrees - coordinate via broadcast, don't touch their files`;
-
-const SECTION_SUBAGENT = `
-## Spawning Agents
-- \`subagent(prompt="...", description="...")\` → create a sibling agent
-- **Fire-and-forget**: subagent() returns immediately, you continue working
-- **Output piping**: When subagent completes, its output arrives as a message`;
-
-const SECTION_SUBAGENT_WORKTREE_NOTE = `
-- Subagents get their own isolated worktrees`;
-
-const SECTION_RECALL = `
-## Querying Agent History
-Use \`recall()\` to see all agents and their status history. Use \`recall(agent_name="X", show_output=true)\` to retrieve a completed agent's final output.`;
-
-const SECTION_SUBAGENT_FOOTER = `
-When you receive output from a subagent, process it and incorporate the results.`;
-
-// =============================================================================
-// Template
+// TEMPLATE PARSER
 // =============================================================================
 
 /**
- * Get the system prompt, dynamically including sections based on config.
+ * Parse a template with {{condition}}...{{condition}} blocks.
+ * Keeps content if condition is true, strips if false.
+ * Supports nesting.
  */
-export function getSystemPrompt(options?: {
-  allowSubagent?: boolean;
-  depth?: number;
-  maxDepth?: number;
-}): string {
-  const worktree = isWorktreeEnabled();
-  const broadcast = isBroadcastEnabled();
-  const subagent = isSubagentEnabled();
-  const recall = isRecallEnabled();
-  const allowSubagent = options?.allowSubagent ?? subagent;
+function parseTemplate(
+  template: string,
+  conditions: Record<string, boolean>,
+  substitutions?: Record<string, string>,
+): string {
+  let result = template;
 
-  // Dynamic content based on worktree config
-  const agentExample = worktree
-    ? `{ name: "agentA", status: "Working on X", worktree: "/path/to/.worktrees/agentA" }`
-    : `{ name: "agentA", status: "Working on X" }`;
+  // Process each condition - find matching pairs and keep/strip content
+  for (const [condition, enabled] of Object.entries(conditions)) {
+    const regex = new RegExp(`{{${condition}}}([\\s\\S]*?){{${condition}}}`, 'g');
 
-  const agentsDescription = worktree
-    ? `- **agents**: Other agents, their status, and their worktree paths`
-    : `- **agents**: Other agents and their current status`;
+    if (enabled) {
+      // Keep the content, remove the tags
+      result = result.replace(regex, '$1');
+    } else {
+      // Strip the entire block including content
+      result = result.replace(regex, '');
+    }
+  }
 
-  const subagentIntro = subagent
-    ? allowSubagent
-      ? SECTION_SUBAGENT_INTRO
-      : SECTION_SUBAGENT_MAX_DEPTH(options?.depth, options?.maxDepth)
-    : '';
-  const subagentSection =
-    subagent && allowSubagent
-      ? `${SECTION_SUBAGENT}${worktree ? SECTION_SUBAGENT_WORKTREE_NOTE : ''}`
-      : '';
-  const subagentFooter = subagent && allowSubagent ? SECTION_SUBAGENT_FOOTER : '';
+  // Substitute placeholders like {{WORKTREE_PATH}}
+  if (substitutions) {
+    for (const [key, value] of Object.entries(substitutions)) {
+      result = result.replace(new RegExp(`{{${key}}}`, 'g'), value);
+    }
+  }
 
-  const lines = [
-    '<instructions tool="pocket-universe">',
-    '# Pocket Universe — Parallel Agent Orchestration',
-    '',
-    ...(broadcast ? ['Use `broadcast` to communicate with other parallel agents.'] : []),
-    subagentIntro,
-    '',
-    ...(broadcast
-      ? [
-          '## IMPORTANT: Announce Yourself First',
-          'Your first action should be calling `broadcast(message="what you\'re working on")` to announce yourself. Until you do, other agents won\'t know your purpose.',
-          '',
-          `**Status updates**: Calling \`broadcast(message="...")\` without \`send_to\` updates your status. This is passive visibility — other agents see your status history when they broadcast. Use status updates to track progress (e.g., "searching for X", "found X", "implementing Y"). Status updates do NOT send messages or wake other agents.`,
-        ]
-      : []),
-    ...(worktree && broadcast
-      ? [SECTION_WORKTREE]
-      : worktree && !broadcast
-        ? [SECTION_WORKTREE]
-        : []),
-    '',
-    ...(broadcast
-      ? [
-          '## Sending Messages',
-          '- `broadcast(message="...")` → **status update** (visible to all, not a message)',
-          '- `broadcast(send_to="agentB", message="...")` → send message to specific agent',
-          '- `broadcast(reply_to=1, message="...")` → reply to message #1',
-          '',
-          '**Important:** Broadcasting without `send_to` updates your status but does NOT queue a message. Use `send_to` for direct communication that needs a reply.',
-        ]
-      : []),
-    ...(subagentSection ? [subagentSection] : []),
-    ...(recall ? [SECTION_RECALL] : []),
-    '',
-    ...(broadcast
-      ? [
-          '## Receiving Messages',
-          'Messages appear as synthetic `broadcast` tool results:',
-          '```',
-          '{',
-          `  agents: [${agentExample}],`,
-          `  messages: [{ id: 1, from: "agentA", content: "..." }]`,
-          '}',
-          '```',
-          '',
-          agentsDescription,
-          `- **messages**: Messages to reply to using \`reply_to\``,
-        ]
-      : []),
-    ...(subagentFooter ? [subagentFooter] : []),
-    '</instructions>',
-  ];
+  // Clean up: collapse multiple blank lines into max 2
+  result = result.replace(/\n{3,}/g, '\n\n');
 
-  return lines.join('\n');
+  return result.trim();
 }
 
-// Legacy export for backwards compatibility (but prefer getSystemPrompt())
+// =============================================================================
+// SYSTEM PROMPT TEMPLATE
+// =============================================================================
+//
+// Read this as the "full" prompt with all features enabled.
+// Each {{tag}}...{{tag}} section is conditionally included.
+//
+
+const SYSTEM_PROMPT_TEMPLATE = `<instructions tool="pocket-universe">
+# Pocket Universe — Parallel Agent Orchestration
+
+{{broadcast}}
+Use \`broadcast\` to communicate with other parallel agents.
+{{broadcast}}
+{{subagent}}
+Use \`subagent\` to create new sibling agents for parallel work.
+{{subagent}}
+{{max_depth_reached}}
+You have reached maximum subagent depth and cannot spawn more subagents from this session.
+{{max_depth_reached}}
+
+{{broadcast}}
+## IMPORTANT: Announce Yourself First
+Your first action should be calling \`broadcast(message="what you're working on")\` to announce yourself. Until you do, other agents won't know your purpose.
+
+**Status updates**: Calling \`broadcast(message="...")\` without \`send_to\` updates your status. This is passive visibility — other agents see your status history when they broadcast. Use status updates to track progress (e.g., "searching for X", "found X", "implementing Y"). Status updates do NOT send messages or wake other agents.
+{{broadcast}}
+
+{{worktree}}
+## Isolated Worktrees
+Each agent operates in its own isolated git worktree - a clean checkout from the last commit.
+- Your worktree path: \`{{WORKTREE_PATH}}\`
+- **ALL file operations should use paths within your worktree**
+- Do NOT modify files outside your assigned worktree
+- Other agents have their own worktrees - coordinate via broadcast, don't touch their files
+{{worktree}}
+
+{{broadcast}}
+## Sending Messages
+- \`broadcast(message="...")\` → **status update** (visible to all, not a message)
+- \`broadcast(send_to="agentB", message="...")\` → send message to specific agent
+- \`broadcast(reply_to=1, message="...")\` → reply to message #1
+
+**Important:** Broadcasting without \`send_to\` updates your status but does NOT queue a message. Use \`send_to\` for direct communication that needs a reply.
+{{broadcast}}
+
+{{subagent}}
+## Spawning Agents
+- \`subagent(prompt="...", description="...")\` → create a sibling agent
+- **Fire-and-forget**: subagent() returns immediately, you continue working
+- **Output piping**: When subagent completes, its output arrives as a message
+{{worktree}}
+- Subagents get their own isolated worktrees
+{{worktree}}
+{{subagent}}
+
+{{recall}}
+## Querying Agent History
+Use \`recall()\` to see all agents and their status history. Use \`recall(agent_name="X", show_output=true)\` to retrieve a completed agent's final output.
+{{recall}}
+
+{{broadcast}}
+## Receiving Messages
+Messages appear as synthetic \`broadcast\` tool results:
+\`\`\`
+{
+  agents: [{ name: "agentA", status: "Working on X"{{worktree}}, worktree: "/path/to/.worktrees/agentA"{{worktree}} }],
+  messages: [{ id: 1, from: "agentA", content: "..." }]
+}
+\`\`\`
+
+- **agents**: Other agents, their status{{worktree}}, and their worktree paths{{worktree}}
+- **messages**: Messages to reply to using \`reply_to\`
+{{broadcast}}
+
+{{subagent}}
+When you receive output from a subagent, process it and incorporate the results.
+{{subagent}}
+</instructions>`;
+
+// =============================================================================
+// PUBLIC API
+// =============================================================================
+
+export interface SystemPromptOptions {
+  /** The agent's worktree path (if in a worktree) */
+  worktreePath?: string;
+  /** Whether max subagent depth has been reached */
+  maxDepthReached?: boolean;
+}
+
+/**
+ * Get the system prompt, conditionally including sections based on config.
+ */
+export function getSystemPrompt(options?: SystemPromptOptions): string {
+  const worktreeEnabled = isWorktreeEnabled();
+
+  const conditions = {
+    broadcast: isBroadcastEnabled(),
+    worktree: worktreeEnabled && !!options?.worktreePath,
+    subagent: isSubagentEnabled() && !options?.maxDepthReached,
+    recall: isRecallEnabled(),
+    max_depth_reached: !!options?.maxDepthReached,
+  };
+
+  const substitutions: Record<string, string> = {};
+  if (options?.worktreePath) {
+    substitutions.WORKTREE_PATH = options.worktreePath;
+  }
+
+  return parseTemplate(SYSTEM_PROMPT_TEMPLATE, conditions, substitutions);
+}
+
+// Legacy export for backwards compatibility
 export const SYSTEM_PROMPT = getSystemPrompt();
-
-// =============================================================================
-// Worktree system prompt
-// =============================================================================
-
-export function getWorktreeSystemPrompt(worktreePath: string): string {
-  return `
-<worktree>
-Your isolated working directory: ${worktreePath}
-ALL file operations (read, write, edit, bash) should use paths within this directory.
-Do NOT modify files outside this worktree.
-</worktree>
-`;
-}

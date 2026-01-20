@@ -1,4 +1,4 @@
-import { getSystemPrompt, getWorktreeSystemPrompt } from '../prompts/system';
+import { getSystemPrompt } from '../prompts/system';
 import { resumeBroadcastPrompt } from '../prompts/broadcast.prompts';
 import { log, LOG } from '../logger';
 import type {
@@ -598,32 +598,26 @@ export function createHooks(client: OpenCodeSessionClient) {
         }
       }
 
-      // Use virtual depth for spawn chain tracking (siblings in hierarchy, virtual nesting for limits)
+      // Get worktree path and max depth info for system prompt
+      const worktreePath = isWorktreeEnabled() ? getWorktree(sessionId) : undefined;
       const depth = getVirtualDepth(sessionId);
       const maxDepth = getMaxSubagentDepth();
-      const allowSubagent = depth < maxDepth;
+      const maxDepthReached = depth >= maxDepth;
 
       // Inject Pocket Universe instructions (dynamically generated based on config)
       output.system.push(
         getSystemPrompt({
-          allowSubagent,
-          depth,
-          maxDepth,
+          worktreePath,
+          maxDepthReached,
         }),
       );
-
-      // Inject agent's own worktree path if worktree feature is enabled
-      if (isWorktreeEnabled()) {
-        const worktreePath = getWorktree(sessionId);
-        if (worktreePath) {
-          output.system.push(getWorktreeSystemPrompt(worktreePath));
-        }
-      }
 
       log.info(LOG.INJECT, `Registered session and injected Pocket Universe system prompt`, {
         sessionId,
         alias: getAlias(sessionId),
-        worktree: isWorktreeEnabled() ? getWorktree(sessionId) || 'none' : 'disabled',
+        worktree: worktreePath || 'disabled',
+        depth,
+        maxDepthReached,
       });
     },
 

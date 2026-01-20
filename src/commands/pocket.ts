@@ -83,14 +83,7 @@ export function parsePocketCommand(input: string): { target?: string; message: s
 // Message Formatting
 // ============================================================================
 
-/**
- * Format the user message for injection into the agent's session.
- */
-function formatUserMessage(message: string): string {
-  return `**Message from user:**
-
-${message}`;
-}
+import { formatUserMessage, POCKET_COMMAND_DESCRIPTION } from '../prompts/pocket.prompts';
 
 // ============================================================================
 // Execution
@@ -260,10 +253,5 @@ export async function executePocketCommand(args: PocketCommandArgs): Promise<Poc
 // Command Definition (for OpenCode plugin registration)
 // ============================================================================
 
-export const POCKET_COMMAND_DESCRIPTION = `Send a message to agents in the current pocket universe.
-
-Usage:
-  /pocket @agentB wrap it up   → sends to agentB
-  /pocket wrap it up           → sends to coordinator (first agent)
-
-The message appears as a user message in the agent's session.`;
+// Re-export for backward compatibility
+export { POCKET_COMMAND_DESCRIPTION } from '../prompts/pocket.prompts';

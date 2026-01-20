@@ -14,7 +14,6 @@ import {
   agentCompletedWithSummary,
   subagentCompletedSummary,
   subagentRunningMessage,
-  taskOutputWithMetadata,
   subagentTaskOutput,
 } from '../prompts/injection';
 import { log, LOG } from '../logger';
@@ -38,7 +37,7 @@ export function createSubagentTaskMessage(
   const callId = `call_sub_${subagent.sessionId.slice(-12)}`;
 
   // Build output similar to what task tool produces
-  const output = subagentTaskOutput(subagent.alias, subagent.description, subagent.sessionId);
+  const output = subagentTaskOutput(subagent.alias, subagent.description);
 
   log.info(LOG.MESSAGE, `Creating synthetic task injection`, {
     parentSessionId,
@@ -161,7 +160,7 @@ export async function injectTaskPartToParent(
           prompt: subagent.prompt,
           subagent_type: 'general',
         },
-        output: subagentRunningMessage(subagent.alias, subagent.sessionId),
+        output: subagentRunningMessage(subagent.alias),
         title: subagent.description,
         metadata: {
           sessionId: subagent.sessionId,
@@ -248,7 +247,7 @@ export async function fetchSubagentOutput(
         sessionId,
         alias,
       });
-      return agentCompletedMessage(alias, sessionId);
+      return agentCompletedMessage(alias);
     }
 
     // Find assistant messages and extract text parts (like native Task tool does)
@@ -259,7 +258,7 @@ export async function fetchSubagentOutput(
         sessionId,
         alias,
       });
-      return agentCompletedMessage(alias, sessionId);
+      return agentCompletedMessage(alias);
     }
 
     // Get the last assistant message
@@ -277,8 +276,7 @@ export async function fetchSubagentOutput(
         alias,
         textLength: text.length,
       });
-      // Format like native Task tool does
-      return taskOutputWithMetadata(text, sessionId);
+      return text;
     }
 
     // Fallback: summarize tool calls if no text
@@ -290,17 +288,17 @@ export async function fetchSubagentOutput(
           return `- ${part.tool}: ${part.state?.title || 'completed'}`;
         })
         .join('\n');
-      return agentCompletedWithSummary(alias, summary, sessionId);
+      return agentCompletedWithSummary(alias, summary);
     }
 
-    return taskOutputWithMetadata(`Agent ${alias} completed.`, sessionId);
+    return agentCompletedMessage(alias);
   } catch (e) {
     log.error(LOG.TOOL, `Failed to fetch subagent output`, {
       sessionId,
       alias,
       error: String(e),
     });
-    return agentCompletedMessage(alias, sessionId);
+    return agentCompletedMessage(alias);
   }
 }
 
@@ -371,7 +369,7 @@ export async function markSubagentCompleted(
   }
 
   // Summary only - full output is piped to the caller, not stored here
-  const summaryOutput = subagentCompletedSummary(subagent.alias, subagent.sessionId);
+  const summaryOutput = subagentCompletedSummary(subagent.alias);
 
   const completedPart = {
     id: subagent.partId,
