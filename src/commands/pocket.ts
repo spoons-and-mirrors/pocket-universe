@@ -230,7 +230,7 @@ export async function executePocketCommand(args: PocketCommandArgs): Promise<Poc
     });
 
     // Send session update notification
-    sendUserMessageSent(targetAlias, message);
+    sendUserMessageSent(mainSessionID, targetAlias, message);
 
     return {
       success: true,

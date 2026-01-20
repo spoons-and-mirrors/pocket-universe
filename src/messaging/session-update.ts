@@ -11,7 +11,7 @@ import {
   isSessionResumptionEnabled,
   isUserMessageSentEnabled,
 } from '../config';
-import { getStoredClient, getMainSessionId } from '../state';
+import { getStoredClient, getRootIdForSession } from '../state';
 
 // Update event types
 export type SessionUpdateEvent =
@@ -90,19 +90,36 @@ function formatUpdateMessage(event: SessionUpdateEvent, details: SessionUpdateDe
  * - Is NOT displayed in the UI transcript
  * - Is visible for debugging/logging purposes
  *
+ * IMPORTANT: Uses session-specific root lookup, NOT global state.
+ * This ensures updates go to the correct main session when multiple exist.
+ *
  * @param event - The type of event that occurred
  * @param details - Details about the event
+ * @param sessionId - The session ID of the agent triggering the update (used to lookup root/main session)
+ * @param mainSessionIdOverride - Optional override for the main session ID (used by /pocket command)
  */
 export async function sendMainSessionUpdate(
   event: SessionUpdateEvent,
   details: SessionUpdateDetails,
+  sessionId?: string,
+  mainSessionIdOverride?: string,
 ): Promise<boolean> {
-  // Get the main session ID (user's actual session, parent of all agents)
-  const mainSessionId = getMainSessionId();
+  // Determine the target main session ID
+  // Priority: explicit override > lookup from sessionId > fail
+  let mainSessionId: string | undefined;
+
+  if (mainSessionIdOverride) {
+    mainSessionId = mainSessionIdOverride;
+  } else if (sessionId) {
+    // Look up the root session (main session) for this agent
+    mainSessionId = getRootIdForSession(sessionId);
+  }
+
   if (!mainSessionId) {
-    log.debug(LOG.SESSION, `Cannot send session update - no main session ID`, {
+    log.debug(LOG.SESSION, `Cannot send session update - no main session ID found`, {
       event,
       agentAlias: details.agentAlias,
+      sessionId,
     });
     return false;
   }
@@ -147,6 +164,7 @@ export async function sendMainSessionUpdate(
     log.debug(LOG.SESSION, `Session update sent to main session`, {
       event,
       mainSessionId,
+      sessionId,
       message,
     });
 
@@ -162,64 +180,104 @@ export async function sendMainSessionUpdate(
 }
 
 // Convenience functions for each event type
+// All functions now require sessionId to ensure correct main session routing
 
-export function sendStatusUpdate(agentAlias: string, status: string): Promise<boolean> {
+export function sendStatusUpdate(
+  sessionId: string,
+  agentAlias: string,
+  status: string,
+): Promise<boolean> {
   if (!isStatusUpdateEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('status_update', { agentAlias, status });
+  return sendMainSessionUpdate('status_update', { agentAlias, status }, sessionId);
 }
 
 export function sendSubagentSpawned(
+  sessionId: string,
   spawnerAlias: string,
   newAgentAlias: string,
   taskDescription: string,
 ): Promise<boolean> {
   if (!isSubagentCreationEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('subagent_spawned', {
-    agentAlias: spawnerAlias,
-    newAgentAlias,
-    taskDescription,
-  });
+  return sendMainSessionUpdate(
+    'subagent_spawned',
+    {
+      agentAlias: spawnerAlias,
+      newAgentAlias,
+      taskDescription,
+    },
+    sessionId,
+  );
 }
 
-export function sendSubagentCompleted(completedAgentAlias: string): Promise<boolean> {
+export function sendSubagentCompleted(
+  sessionId: string,
+  completedAgentAlias: string,
+): Promise<boolean> {
   if (!isSubagentCompletionEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('subagent_completed', {
-    agentAlias: completedAgentAlias,
-    completedAgentAlias,
-  });
+  return sendMainSessionUpdate(
+    'subagent_completed',
+    {
+      agentAlias: completedAgentAlias,
+      completedAgentAlias,
+    },
+    sessionId,
+  );
 }
 
 export function sendSessionResumed(
+  sessionId: string,
   agentAlias: string,
   resumedByAlias?: string,
   reason?: string,
 ): Promise<boolean> {
   if (!isSessionResumptionEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('session_resumed', {
-    agentAlias,
-    resumedByAlias,
-    resumeReason: reason,
-  });
+  return sendMainSessionUpdate(
+    'session_resumed',
+    {
+      agentAlias,
+      resumedByAlias,
+      resumeReason: reason,
+    },
+    sessionId,
+  );
 }
 
 export function sendMessageSent(
+  sessionId: string,
   senderAlias: string,
   recipientAlias: string,
   messagePreview: string,
 ): Promise<boolean> {
   if (!isMessageSentEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('message_sent', {
-    agentAlias: senderAlias,
-    recipientAlias,
-    messagePreview,
-  });
+  return sendMainSessionUpdate(
+    'message_sent',
+    {
+      agentAlias: senderAlias,
+      recipientAlias,
+      messagePreview,
+    },
+    sessionId,
+  );
 }
 
-export function sendUserMessageSent(targetAlias: string, messagePreview: string): Promise<boolean> {
+/**
+ * Send user message notification - uses mainSessionId directly since
+ * the /pocket command already knows the main session.
+ */
+export function sendUserMessageSent(
+  mainSessionId: string,
+  targetAlias: string,
+  messagePreview: string,
+): Promise<boolean> {
   if (!isUserMessageSentEnabled()) return Promise.resolve(false);
-  return sendMainSessionUpdate('user_message_sent', {
-    agentAlias: 'user',
-    targetAlias,
-    userMessagePreview: messagePreview,
-  });
+  return sendMainSessionUpdate(
+    'user_message_sent',
+    {
+      agentAlias: 'user',
+      targetAlias,
+      userMessagePreview: messagePreview,
+    },
+    undefined, // No sessionId lookup needed
+    mainSessionId, // Use direct override
+  );
 }

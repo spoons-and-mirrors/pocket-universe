@@ -59,7 +59,7 @@ export async function resumeSessionWithBroadcast(
     });
 
     // Send session update to main session (if enabled)
-    sendSessionResumed(recipientAlias, senderAlias, 'broadcast').catch(() => {
+    sendSessionResumed(recipientSessionId, recipientAlias, senderAlias, 'broadcast').catch(() => {
       // Ignore errors - this is a fire-and-forget notification
     });
 
@@ -176,9 +176,11 @@ export async function resumeWithSubagentOutput(
 
   // Send session update to main session (if enabled) - subagent completed triggers resume
   if (!callerIsIdle && !callerInHook) {
-    sendSessionResumed(recipientAlias, senderAlias, 'subagent_output').catch(() => {
-      // Ignore errors - this is a fire-and-forget notification
-    });
+    sendSessionResumed(recipientSessionId, recipientAlias, senderAlias, 'subagent_output').catch(
+      () => {
+        // Ignore errors - this is a fire-and-forget notification
+      },
+    );
   }
 
   // ALWAYS store in pendingSubagentOutputs first (safety net for race conditions)

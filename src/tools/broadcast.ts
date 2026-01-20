@@ -138,7 +138,7 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         });
 
         // Send session update to main session (if enabled)
-        sendStatusUpdate(alias, messageContent).catch(() => {
+        sendStatusUpdate(sessionId, alias, messageContent).catch(() => {
           // Ignore errors - this is a fire-and-forget notification
         });
 
@@ -223,7 +223,7 @@ export function createBroadcastTool(client: OpenCodeSessionClient) {
         sendMessage(alias, recipientSessionId, messageContent);
 
         // Send session update to main session (if enabled)
-        sendMessageSent(alias, recipientAlias, messageContent).catch(() => {
+        sendMessageSent(sessionId, alias, recipientAlias, messageContent).catch(() => {
           // Ignore errors - this is a fire-and-forget notification
         });
 

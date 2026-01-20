@@ -229,7 +229,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
         });
 
         // Send session update to main session (if enabled)
-        sendSubagentSpawned(callerAlias, newAlias, description).catch(() => {
+        sendSubagentSpawned(sessionId, callerAlias, newAlias, description).catch(() => {
           // Ignore errors - this is a fire-and-forget notification
         });
 
@@ -332,7 +332,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             const subagentOutput = await fetchSubagentOutput(client, newSessionId, newAlias);
 
             // 1.5. Send session update to main session (if enabled)
-            sendSubagentCompleted(newAlias).catch(() => {
+            sendSubagentCompleted(newSessionId, newAlias).catch(() => {
               // Ignore errors - this is a fire-and-forget notification
             });
 
@@ -349,7 +349,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             });
 
             // 3. Save to history for recall tool
-            saveAgentToHistory(newAlias, subagentOutput);
+            saveAgentToHistory(newSessionId, newAlias, subagentOutput);
 
             // 4. Mark the subagent as completed in the parent TUI
             const subagent = activeSubagents.get(newSessionId);

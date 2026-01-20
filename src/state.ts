@@ -92,10 +92,19 @@ export const agentFinalOutputs = new Map<string, string>(); // alias -> output
 /**
  * Save an agent's data to the completed history.
  * Called when an agent completes its work.
+ *
+ * IMPORTANT: Uses session ID to determine which pocket/main session the agent belongs to.
+ * This ensures proper scoping when multiple main sessions exist.
+ *
+ * @param sessionId - The session ID of the completing agent
+ * @param alias - The agent's alias
+ * @param finalOutput - The agent's final output
  */
-export function saveAgentToHistory(alias: string, finalOutput: string): void {
+export function saveAgentToHistory(sessionId: string, alias: string, finalOutput: string): void {
   const statusHistory = agentDescriptions.get(alias) || [];
-  const pocketId = getCurrentPocketId();
+  // Use the agent's root session ID as the pocket identifier
+  // This is session-specific, not a global
+  const pocketId = getRootIdForSession(sessionId);
 
   // Check if already in history (avoid duplicates)
   const existing = completedAgentHistory.find((r) => r.alias === alias);
@@ -120,6 +129,7 @@ export function saveAgentToHistory(alias: string, finalOutput: string): void {
   completedAgentHistory.push(record);
   log.info(LOG.SESSION, `Saved agent to history`, {
     alias,
+    sessionId,
     statusCount: statusHistory.length,
     outputLength: finalOutput.length,
     totalHistory: completedAgentHistory.length,
@@ -131,8 +141,16 @@ export function saveAgentToHistory(alias: string, finalOutput: string): void {
  * Get agent info for recall tool - queries both active agents and history.
  * Output is only included when showOutput=true AND agentName is specified.
  * When recall_cross_pocket is false, only shows agents from current pocket universe.
+ *
+ * IMPORTANT: Uses caller's session ID to determine which main session to filter by.
+ * This ensures agents only see other agents from the same main session.
+ *
+ * @param callerSessionId - The session ID of the agent calling recall (for scoping)
+ * @param agentName - Optional specific agent to recall
+ * @param showOutput - Whether to include output (only works with agentName)
  */
 export function recallAgents(
+  callerSessionId: string,
   agentName?: string,
   showOutput?: boolean,
 ): {
@@ -155,13 +173,17 @@ export function recallAgents(
 
   // Check if cross-pocket recall is enabled
   const crossPocket = isRecallCrossPocket();
-  const pocketId = getCurrentPocketId();
+
+  // Get the caller's root session (main session) for proper scoping
+  // This is the ONLY correct way to filter - using the caller's own root
+  const callerRootId = getRootIdForSession(callerSessionId);
 
   // First, add historical (completed) agents
   for (const record of completedAgentHistory) {
     if (agentName && record.alias !== agentName) continue;
     // Filter by pocket if cross-pocket is disabled
-    if (!crossPocket && pocketId && record.pocketId !== pocketId) continue;
+    // Use callerRootId comparison - pocketId in history should match caller's root
+    if (!crossPocket && callerRootId && record.pocketId !== callerRootId) continue;
     const entry: {
       name: string;
       status_history: string[];
@@ -180,18 +202,16 @@ export function recallAgents(
   }
 
   // Then add active agents (not yet in history)
-  // Filter by main session - main sessions are completely isolated, agents NEVER cross them
-  const mainSessionId = getMainSessionId();
-
+  // Filter by caller's root session - agents NEVER cross main sessions
   for (const [alias, sessionId] of aliasToSession) {
     // Skip if already in history
     if (completedAgentHistory.some((r) => r.alias === alias)) continue;
     if (agentName && alias !== agentName) continue;
 
-    // Always filter by main session - agents from different main sessions must never be visible
-    if (mainSessionId) {
+    // Always filter by caller's root session - agents from different main sessions must never be visible
+    if (callerRootId) {
       const agentRootId = sessionToRootId.get(sessionId);
-      if (agentRootId !== mainSessionId) {
+      if (agentRootId !== callerRootId) {
         continue; // Different main session (or untracked), skip
       }
     }

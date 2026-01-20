@@ -31,7 +31,7 @@ export function createRecallTool() {
         showOutput: args.show_output || false,
       });
 
-      const result = recallAgents(args.agent_name, args.show_output);
+      const result = recallAgents(sessionId, args.agent_name, args.show_output);
 
       if (result.agents.length === 0) {
         if (args.agent_name) {
