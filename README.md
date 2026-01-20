@@ -168,25 +168,28 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
     // Enable the broadcast tool for inter-agent messaging
     "broadcast": true,
 
-    // Enable the subagent tool for creating sibling agents
-    "subagent": true,
+    // Subagent tool configuration
+    "subagent": {
+      // Enable the subagent tool for creating sibling agents
+      "enabled": true,
 
-    // Enable the recall tool for querying agent history
-    "recall": false,
-  },
+      // Max session depth allowed to spawn subagents (main session = 0, exclusive)
+      "max_depth": 3,
 
-  // Tool configuration parameters
-  "parameters": {
-    // Max session depth allowed to spawn subagents (main session = 0, exclusive)
-    "subagent_max_depth": 3,
+      // When true (default), subagent results appear in broadcast inbox.
+      // When false, subagent results are injected as persisted user message.
+      "forced_attention": true,
+    },
 
-    // When true (default), subagent results appear in broadcast inbox.
-    // When false, subagent results are injected as persisted user message.
-    "subagent_result_forced_attention": true,
+    // Recall tool configuration
+    "recall": {
+      // Enable the recall tool for querying agent history
+      "enabled": false,
 
-    // When true (default), recall can access agents from prior pocket universes.
-    // When false, recall only shows current pocket universe agents.
-    "recall_cross_pocket": true,
+      // When true (default), recall can access agents from prior pocket universes.
+      // When false, recall only shows current pocket universe agents.
+      "cross_pocket": true,
+    },
   },
 
   // Enable isolated git worktrees for each agent
@@ -202,19 +205,24 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 
 **`tools`**
 
-| Flag        | Default | Description                                            |
-| ----------- | ------- | ------------------------------------------------------ |
-| `broadcast` | `true`  | Enable the `broadcast` tool for inter-agent messaging  |
-| `subagent`  | `true`  | Enable the `subagent` tool for creating sibling agents |
-| `recall`    | `false` | Enable the `recall` tool for querying agent history    |
+| Flag        | Default | Description                                           |
+| ----------- | ------- | ----------------------------------------------------- |
+| `broadcast` | `true`  | Enable the `broadcast` tool for inter-agent messaging |
 
-**`parameters`**
+**`tools.subagent`**
 
-| Parameter                          | Default | Description                                                                                           |
-| ---------------------------------- | ------- | ----------------------------------------------------------------------------------------------------- |
-| `subagent_max_depth`               | `3`     | Max session depth allowed to spawn subagents (main session = 0, exclusive)                            |
-| `subagent_result_forced_attention` | `true`  | When true, subagent output appears in broadcast inbox; when false, injected as persisted user message |
-| `recall_cross_pocket`              | `true`  | When true, recall can access agents from prior pocket universes                                       |
+| Parameter          | Default | Description                                                                                           |
+| ------------------ | ------- | ----------------------------------------------------------------------------------------------------- |
+| `enabled`          | `true`  | Enable the `subagent` tool for creating sibling agents                                                |
+| `max_depth`        | `3`     | Max session depth allowed to spawn subagents (main session = 0, exclusive)                            |
+| `forced_attention` | `true`  | When true, subagent output appears in broadcast inbox; when false, injected as persisted user message |
+
+**`tools.recall`**
+
+| Parameter      | Default | Description                                            |
+| -------------- | ------- | ------------------------------------------------------ |
+| `enabled`      | `false` | Enable the `recall` tool for querying agent history    |
+| `cross_pocket` | `true`  | When true, recall can access agents from prior pockets |
 
 **Top-level**
 

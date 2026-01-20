@@ -44,6 +44,44 @@ export interface SessionUpdateConfig {
   user: SessionUpdateUserConfig;
 }
 
+/** Subagent tool configuration */
+export interface SubagentConfig {
+  /** Enable the subagent tool for creating sibling agents (default: true) */
+  enabled: boolean;
+  /**
+   * Max session depth allowed to spawn subagents (main session = 0).
+   * Sessions at or deeper than this cannot call the subagent tool.
+   */
+  max_depth: number;
+  /**
+   * When true (default), subagent results appear in the broadcast inbox
+   * via synthetic injection. When false, subagent results are injected
+   * as a persisted user message, forcing immediate LLM attention.
+   */
+  forced_attention: boolean;
+}
+
+/** Recall tool configuration */
+export interface RecallConfig {
+  /** Enable the recall tool for querying agent history (default: false) */
+  enabled: boolean;
+  /**
+   * When true (default), recall tool can access agents from prior pocket universes.
+   * When false, recall only shows agents from the current pocket universe.
+   */
+  cross_pocket: boolean;
+}
+
+/** Tools configuration */
+export interface ToolsConfig {
+  /** Enable the broadcast tool for inter-agent messaging (default: true) */
+  broadcast: boolean;
+  /** Subagent tool configuration */
+  subagent: SubagentConfig;
+  /** Recall tool configuration */
+  recall: RecallConfig;
+}
+
 export interface PocketUniverseConfig {
   /** Enable isolated git worktrees for each agent (default: false) */
   worktree: boolean;
@@ -51,34 +89,8 @@ export interface PocketUniverseConfig {
   logging: boolean;
   /** Send ignored user messages to main session on agent events */
   session_update: SessionUpdateConfig;
-  /** Tool enablement flags */
-  tools: {
-    /** Enable the broadcast tool for inter-agent messaging (default: true) */
-    broadcast: boolean;
-    /** Enable the subagent tool for creating sibling agents (default: true) */
-    subagent: boolean;
-    /** Enable the recall tool for querying agent history (default: false) */
-    recall: boolean;
-  };
-  /** Tool configuration parameters */
-  parameters: {
-    /**
-     * Max session depth allowed to spawn subagents (main session = 0).
-     * Sessions at or deeper than this cannot call the subagent tool.
-     */
-    subagent_max_depth: number;
-    /**
-     * When true (default), subagent results appear in the broadcast inbox
-     * via synthetic injection. When false, subagent results are injected
-     * as a persisted user message, forcing immediate LLM attention.
-     */
-    subagent_result_forced_attention: boolean;
-    /**
-     * When true (default), recall tool can access agents from prior pocket universes.
-     * When false, recall only shows agents from the current pocket universe.
-     */
-    recall_cross_pocket: boolean;
-  };
+  /** Tools configuration */
+  tools: ToolsConfig;
 }
 
 // ============================================================================
@@ -104,13 +116,15 @@ const DEFAULT_CONFIG: PocketUniverseConfig = {
   },
   tools: {
     broadcast: true,
-    subagent: true,
-    recall: false,
-  },
-  parameters: {
-    subagent_max_depth: 3,
-    subagent_result_forced_attention: true,
-    recall_cross_pocket: true,
+    subagent: {
+      enabled: true,
+      max_depth: 3,
+      forced_attention: true,
+    },
+    recall: {
+      enabled: false,
+      cross_pocket: true,
+    },
   },
 };
 
@@ -235,7 +249,6 @@ function loadConfig(): PocketUniverseConfig {
         worktree: loadedConfig.worktree,
         logging: loadedConfig.logging,
         tools: loadedConfig.tools,
-        parameters: loadedConfig.parameters,
       });
     });
   }
@@ -272,14 +285,14 @@ export function isBroadcastEnabled(): boolean {
  * Check if subagent tool is enabled
  */
 export function isSubagentEnabled(): boolean {
-  return loadConfig().tools.subagent;
+  return loadConfig().tools.subagent.enabled;
 }
 
 /**
  * Check if recall tool is enabled
  */
 export function isRecallEnabled(): boolean {
-  return loadConfig().tools.recall;
+  return loadConfig().tools.recall.enabled;
 }
 
 /**
@@ -293,7 +306,7 @@ export function isLoggingEnabled(): boolean {
  * Get max subagent nesting depth (minimum 0)
  */
 export function getMaxSubagentDepth(): number {
-  const depth = Number(loadConfig().parameters.subagent_max_depth);
+  const depth = Number(loadConfig().tools.subagent.max_depth);
   return Number.isFinite(depth) && depth >= 0 ? depth : 0;
 }
 
@@ -301,14 +314,14 @@ export function getMaxSubagentDepth(): number {
  * Check if subagent result forced attention mode is enabled
  */
 export function isSubagentResultForcedAttention(): boolean {
-  return loadConfig().parameters.subagent_result_forced_attention;
+  return loadConfig().tools.subagent.forced_attention;
 }
 
 /**
  * Check if recall can access agents from prior pocket universes
  */
 export function isRecallCrossPocket(): boolean {
-  return loadConfig().parameters.recall_cross_pocket;
+  return loadConfig().tools.recall.cross_pocket;
 }
 
 /**
@@ -379,17 +392,19 @@ export function getConfigTemplate(): string {
   return `{
   "tools": {
     "broadcast": true, // inter-agent messaging
-    "subagent": true, // async, sibling subagents
-    "recall": false // query current and past subagents
-  },
 
-  "parameters": {
-    // When true (default), subagent results appear in broadcast inbox.
-    // When false, subagent results are injected as persisted user message.
-    "subagent_result_forced_attention": true,
-  
-    "subagent_max_depth": 3, // subagent max depth allowed (main session = 0)
-    "recall_cross_pocket": true // access prior pocket universe agents
+    "subagent": {
+      "enabled": true, // async, sibling subagents
+      "max_depth": 3, // max depth allowed (main session = 0)
+      // When true (default), subagent results appear in broadcast inbox.
+      // When false, subagent results are injected as persisted user message.
+      "forced_attention": true
+    },
+
+    "recall": {
+      "enabled": false, // query current and past subagents
+      "cross_pocket": true // access prior pocket universe agents
+    }
   },
 
   // Show pocket universe updates in main session
@@ -412,7 +427,7 @@ export function getConfigTemplate(): string {
 
   // Enable isolated git worktrees for each agent
   // Each agent gets its own clean checkout from HEAD
-  "worktree": false,
+  "worktree": false
 }
 `;
 }
