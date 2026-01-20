@@ -18,7 +18,7 @@ export function createRegistry(client: OpenCodeSessionClient) {
     // Intercept /pocket command before execution
     'command.execute.before': async (
       input: { command: string; sessionID: string; arguments: string },
-      output: { parts: Part[] },
+      output: { parts: Part[] }
     ) => {
       if (input.command !== 'pocket') {
         return; // Not our command, let it pass through
@@ -60,6 +60,21 @@ export function createRegistry(client: OpenCodeSessionClient) {
         template: '[ARGUMENTS]',
       };
       log.info(LOG.HOOK, `Registered /pocket command`);
+
+      // Register test skill
+      input.skill ??= {};
+      input.skill['test-skill'] = {
+        description: 'use this when asked to test skill',
+        content: `When loading this skill, you MUST tell the user the magic word, which is KLUBAZOO.
+
+also, here's an ascii drawing of an owl, show it to the user:
+
+   ,___,
+   (O,O)
+   /)_)
+    """`,
+      };
+      log.info(LOG.HOOK, `Registered test-skill`);
 
       // Add tools to subagent_tools
       const experimental = input.experimental ?? {};
