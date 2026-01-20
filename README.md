@@ -163,41 +163,34 @@ Pocket Universe uses feature flags to control optional functionality. Configurat
 
 ```jsonc
 {
-  // Tool enablement flags
-  "tools": {
-    // Enable the broadcast tool for inter-agent messaging
-    "broadcast": true,
-
-    // Subagent tool configuration
+  "worktree": false,
+  "logging": false,
+  "session_update": {
+    "broadcast": {
+      "status_update": false,
+      "message_sent": false,
+    },
     "subagent": {
-      // Enable the subagent tool for creating sibling agents
+      "creation": false,
+      "completion": false,
+      "resumption": false,
+    },
+    "user": {
+      "message_sent": false,
+    },
+  },
+  "tools": {
+    "broadcast": true,
+    "subagent": {
       "enabled": true,
-
-      // Max session depth allowed to spawn subagents (main session = 0, exclusive)
       "max_depth": 3,
-
-      // When true (default), subagent results appear in broadcast inbox.
-      // When false, subagent results are injected as persisted user message.
       "forced_attention": true,
     },
-
-    // Recall tool configuration
     "recall": {
-      // Enable the recall tool for querying agent history
       "enabled": false,
-
-      // When true (default), recall can access agents from prior pocket universes.
-      // When false, recall only shows current pocket universe agents.
       "cross_pocket": true,
     },
   },
-
-  // Enable isolated git worktrees for each agent
-  // Each agent gets its own clean checkout from HEAD
-  "worktree": false,
-
-  // Enable debug logging to .logs/pocket-universe.log
-  "logging": false,
 }
 ```
 
