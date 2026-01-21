@@ -141,6 +141,79 @@ let configLoaded = false;
 let activeConfigPath: string | null = null;
 
 /**
+ * Check if a value is a plain object (not null, array, or primitive)
+ */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Deep merge two objects, with source values overriding target values.
+ * For nested objects, recursively merges. For primitives/arrays, source wins.
+ * Returns a new object without mutating inputs.
+ */
+function deepMergeImpl(
+  target: Record<string, unknown>,
+  source: Record<string, unknown>
+): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...target };
+
+  for (const key of Object.keys(source)) {
+    const sourceValue = source[key];
+    const targetValue = result[key];
+
+    // If both are plain objects, recursively merge
+    if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
+      result[key] = deepMergeImpl(targetValue, sourceValue);
+    } else if (sourceValue !== undefined) {
+      // Otherwise, source value wins (if defined)
+      result[key] = sourceValue;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Deep merge a partial config with defaults.
+ * Type-safe wrapper around deepMergeImpl.
+ */
+function deepMergeConfig(
+  defaults: PocketUniverseConfig,
+  partial: Record<string, unknown>
+): PocketUniverseConfig {
+  const result = deepMergeImpl(defaults as unknown as Record<string, unknown>, partial);
+  return result as unknown as PocketUniverseConfig;
+}
+
+/**
+ * Deep merge two objects, with source values overriding target values.
+ * For nested objects, recursively merges. For primitives/arrays, source wins.
+ * Returns a new object without mutating inputs.
+ */
+function deepMerge<T extends Record<string, unknown>>(
+  target: T,
+  source: Record<string, unknown>
+): T {
+  const result = { ...target } as Record<string, unknown>;
+
+  for (const key of Object.keys(source)) {
+    const sourceValue = source[key];
+    const targetValue = result[key];
+
+    // If both are plain objects, recursively merge
+    if (isPlainObject(sourceValue) && isPlainObject(targetValue)) {
+      result[key] = deepMerge(targetValue as Record<string, unknown>, sourceValue);
+    } else if (sourceValue !== undefined) {
+      // Otherwise, source value wins (if defined)
+      result[key] = sourceValue;
+    }
+  }
+
+  return result as T;
+}
+
+/**
  * Strip comments from JSONC content
  */
 function stripJsonComments(content: string): string {
@@ -226,14 +299,36 @@ function loadConfig(): PocketUniverseConfig {
     const jsonContent = stripTrailingCommas(stripJsonComments(content));
     const parsed = JSON.parse(jsonContent);
 
-    // Merge with defaults to ensure all fields exist
-    loadedConfig = {
-      ...DEFAULT_CONFIG,
-      ...parsed,
-    };
-    // Config loaded silently - no console output
+    // Validate parsed is a plain object before merging
+    if (!isPlainObject(parsed)) {
+      // Invalid config format (null, array, primitive) - use defaults
+      loadedConfig = { ...DEFAULT_CONFIG };
+    } else {
+      // Deep merge with defaults to ensure all nested fields exist
+      loadedConfig = deepMergeConfig(DEFAULT_CONFIG, parsed);
+    }
   } catch {
-    // Silently fall back to defaults on parse error
+    // Silently fall back to defaults on any error (read, parse, etc.)
+    loadedConfig = { ...DEFAULT_CONFIG };
+  }
+
+  // Final defensive check: ensure critical nested objects exist
+  // This catches edge cases like corrupted merges or future schema changes
+  try {
+    if (!loadedConfig.tools?.subagent || !loadedConfig.tools?.recall) {
+      loadedConfig = deepMergeConfig(
+        DEFAULT_CONFIG,
+        loadedConfig as unknown as Record<string, unknown>
+      );
+    }
+    if (!loadedConfig.session_update?.broadcast || !loadedConfig.session_update?.subagent) {
+      loadedConfig = deepMergeConfig(
+        DEFAULT_CONFIG,
+        loadedConfig as unknown as Record<string, unknown>
+      );
+    }
+  } catch {
+    // If validation itself fails, fall back to pure defaults
     loadedConfig = { ...DEFAULT_CONFIG };
   }
 
