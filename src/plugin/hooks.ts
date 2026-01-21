@@ -56,7 +56,8 @@ import {
   getRootSessionId,
 } from '../injection/index';
 import { createAgentWorktree } from '../worktree';
-import { getMaxSubagentDepth, isWorktreeEnabled } from '../config';
+import { getMaxSubagentDepth, isWorktreeEnabled, isSubagentEnabled } from '../config';
+import { listSubagentAgents } from '../agents';
 
 export function createHooks(client: OpenCodeSessionClient) {
   // Store client for model info fetching in resume logic
@@ -69,7 +70,7 @@ export function createHooks(client: OpenCodeSessionClient) {
         sessionID: string;
         parentSessionID?: string;
       },
-      output: { resumePrompt?: string },
+      output: { resumePrompt?: string }
     ) => {
       const alias = sessionToAlias.get(input.sessionID) || 'unknown';
 
@@ -106,7 +107,7 @@ export function createHooks(client: OpenCodeSessionClient) {
               clearInterval(interval);
               resolve();
             },
-            5 * 60 * 1000,
+            5 * 60 * 1000
           );
         });
       };
@@ -129,7 +130,7 @@ export function createHooks(client: OpenCodeSessionClient) {
               alias,
               pendingSubagentCount: subagentIds.length,
               pendingSubagentIds: subagentIds,
-            },
+            }
           );
 
           // Wait for all pending subagents to become idle
@@ -182,7 +183,7 @@ export function createHooks(client: OpenCodeSessionClient) {
                 sessionID: input.sessionID,
                 alias,
                 senderAlias: pendingOutput.senderAlias,
-              },
+              }
             );
             noReplyDeliveredSessions.delete(input.sessionID);
             // Don't set resumePrompt - continue loop to check other conditions
@@ -197,7 +198,7 @@ export function createHooks(client: OpenCodeSessionClient) {
               alias,
               senderAlias: pendingOutput.senderAlias,
               outputLength: pendingOutput.output.length,
-            },
+            }
           );
 
           // Use resumePrompt to actually resume the session
@@ -297,7 +298,7 @@ export function createHooks(client: OpenCodeSessionClient) {
                     lastChildSessionId: input.sessionID,
                     mainSessionId: parentId,
                     alias,
-                  },
+                  }
                 );
 
                 // Mark as injected to prevent duplicates
@@ -307,7 +308,7 @@ export function createHooks(client: OpenCodeSessionClient) {
                 injectPocketUniverseSummaryToMain(parentId).catch((e: unknown) =>
                   log.error(LOG.SESSION, `Failed to inject summary to main`, {
                     error: String(e),
-                  }),
+                  })
                 );
               }
             } else {
@@ -320,14 +321,14 @@ export function createHooks(client: OpenCodeSessionClient) {
                   childSessionId: input.sessionID,
                   mainSessionId: parentId,
                   alias,
-                },
+                }
               );
 
               summaryInjectedSessions.add(parentId);
               injectPocketUniverseSummaryToMain(parentId).catch((e: unknown) =>
                 log.error(LOG.SESSION, `Failed to inject summary to main`, {
                   error: String(e),
-                }),
+                })
               );
             }
           }
@@ -403,7 +404,7 @@ export function createHooks(client: OpenCodeSessionClient) {
                 alias,
                 pendingSubagentCount: pending.size,
                 pendingSubagentIds: Array.from(pending),
-              },
+              }
             );
           }
 
@@ -439,7 +440,7 @@ export function createHooks(client: OpenCodeSessionClient) {
               (e: unknown) =>
                 log.error(LOG.SESSION, `Failed to resume with unread message`, {
                   error: String(e),
-                }),
+                })
             );
           }
         } else {
@@ -489,7 +490,7 @@ export function createHooks(client: OpenCodeSessionClient) {
     // Only for child sessions (those with parentID)
     'experimental.chat.system.transform': async (
       input: SystemTransformInput,
-      output: SystemTransformOutput,
+      output: SystemTransformOutput
     ) => {
       const sessionId = input.sessionID;
       if (!sessionId) {
@@ -604,12 +605,26 @@ export function createHooks(client: OpenCodeSessionClient) {
       const maxDepth = getMaxSubagentDepth();
       const maxDepthReached = depth >= maxDepth;
 
+      // Lazily fetch available agent types (only when subagent is enabled)
+      let subagentTypes: Array<{ name: string; description?: string }> | undefined;
+      if (isSubagentEnabled() && !maxDepthReached) {
+        try {
+          const agents = await listSubagentAgents(client);
+          if (agents.length > 0) {
+            subagentTypes = agents.map((a) => ({ name: a.name, description: a.description }));
+          }
+        } catch (e) {
+          log.warn(LOG.HOOK, `Failed to fetch agent types`, { error: String(e) });
+        }
+      }
+
       // Inject Pocket Universe instructions (dynamically generated based on config)
       output.system.push(
         getSystemPrompt({
           worktreePath,
           maxDepthReached,
-        }),
+          subagentTypes,
+        })
       );
 
       log.info(LOG.INJECT, `Registered session and injected Pocket Universe system prompt`, {
@@ -625,13 +640,13 @@ export function createHooks(client: OpenCodeSessionClient) {
     // Only for child sessions (those with parentID)
     'experimental.chat.messages.transform': async (
       _input: unknown,
-      output: MessagesTransformOutput,
+      output: MessagesTransformOutput
     ) => {
       const lastUserMsg = [...output.messages].reverse().find((m) => m.info.role === 'user');
       if (!lastUserMsg) {
         log.debug(
           LOG.INJECT,
-          `No user message found in transform, skipping Pocket Universe injection`,
+          `No user message found in transform, skipping Pocket Universe injection`
         );
         return;
       }
@@ -654,7 +669,7 @@ export function createHooks(client: OpenCodeSessionClient) {
           {
             sessionId,
             subagents: uninjectedSubagents.map((s) => s.alias),
-          },
+          }
         );
 
         // Inject synthetic task tool results for each subagent
@@ -731,14 +746,14 @@ export function createHooks(client: OpenCodeSessionClient) {
         lastUserMsg,
         parallelAgents,
         hasAnnounced,
-        selfAlias,
+        selfAlias
       );
 
       // Mark all injected messages as "presented" to prevent double-delivery via resume
       if (unhandled.length > 0) {
         markMessagesAsPresented(
           sessionId,
-          unhandled.map((message: { msgIndex: number }) => message.msgIndex),
+          unhandled.map((message: { msgIndex: number }) => message.msgIndex)
         );
 
         log.debug(LOG.INJECT, `Marked injected messages as presented`, {

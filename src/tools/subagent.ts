@@ -12,6 +12,7 @@ import {
   subagentMaxDepth,
   receivedSubagentOutput,
   subagentError,
+  subagentUnknownType,
 } from '../prompts/subagent.prompts';
 import { log, LOG } from '../logger';
 import type { OpenCodeSessionClient, ToolContext, SubagentInfo } from '../types';
@@ -47,6 +48,7 @@ import {
 } from '../injection/index';
 import { createAgentWorktree } from '../worktree';
 import { getMaxSubagentDepth, isWorktreeEnabled, isSubagentResultForcedAttention } from '../config';
+import { listSubagentAgents } from '../agents';
 
 // ============================================================================
 // Helper: Get caller's agent and model info from their session messages
@@ -64,7 +66,7 @@ interface CallerModelInfo {
  */
 async function getCallerModelInfo(
   client: OpenCodeSessionClient,
-  sessionId: string,
+  sessionId: string
 ): Promise<CallerModelInfo> {
   try {
     const messagesResult = await client.session.messages({
@@ -145,6 +147,10 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
         .string()
         .optional()
         .describe('Short description of the task (3-5 words)'),
+      subagent_type: tool.schema
+        .string()
+        .optional()
+        .describe('The type of specialized agent to use for this task'),
     },
     async execute(args, context: ToolContext) {
       const sessionId = context.sessionID;
@@ -177,6 +183,27 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
 
       const callerAlias = getAlias(sessionId);
       const description = args.description || args.prompt.substring(0, 50);
+
+      const callerModelInfo = await getCallerModelInfo(client, sessionId);
+      const availableAgents = await listSubagentAgents(client);
+      const availableTypes = availableAgents.map((agent) => agent.name);
+      const requestedSubagentType = args.subagent_type ?? callerModelInfo.agent;
+      const selectedAgent = requestedSubagentType
+        ? availableAgents.find((agent) => agent.name === requestedSubagentType)
+        : undefined;
+
+      if (args.subagent_type && availableAgents.length > 0 && !selectedAgent) {
+        log.warn(LOG.TOOL, 'subagent unknown subagent_type', {
+          sessionId,
+          callerAlias,
+          requestedSubagentType,
+          availableTypes,
+        });
+        return subagentUnknownType(args.subagent_type, availableTypes);
+      }
+
+      const selectedAgentName = selectedAgent?.name ?? requestedSubagentType;
+      const selectedModel = selectedAgent?.model ?? callerModelInfo.model;
 
       log.info(LOG.TOOL, `subagent called`, {
         callerAlias,
@@ -241,6 +268,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
           prompt: args.prompt,
           timestamp: Date.now(),
           injected: false,
+          subagentType: selectedAgentName,
           parentSessionId: parentId,
         };
 
@@ -287,18 +315,18 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
         // Get caller's agent/model to inherit
         const callerModelInfo = await getCallerModelInfo(client, sessionId);
 
-        log.info(LOG.TOOL, `subagent inheriting caller's agent/model`, {
+        log.info(LOG.TOOL, `subagent using agent/model`, {
           callerAlias,
-          agent: callerModelInfo.agent,
-          modelID: callerModelInfo.model?.modelID,
-          providerID: callerModelInfo.model?.providerID,
+          selectedAgentName,
+          selectedModelID: selectedModel?.modelID,
+          selectedProviderID: selectedModel?.providerID,
         });
 
         // Store the model info for this session (used by /pocket and resume)
-        if (callerModelInfo.agent || callerModelInfo.model) {
+        if (selectedAgentName || selectedModel) {
           setSessionModelInfo(newSessionId, {
-            agent: callerModelInfo.agent,
-            model: callerModelInfo.model,
+            agent: selectedAgentName,
+            model: selectedModel,
           });
         }
 
@@ -308,8 +336,8 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
             path: { id: newSessionId },
             body: {
               parts: [{ type: 'text', text: args.prompt }],
-              agent: callerModelInfo.agent,
-              model: callerModelInfo.model,
+              agent: selectedAgentName,
+              model: selectedModel,
             },
           })
           .then(async (result) => {
@@ -395,7 +423,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
                 resumeSessionWithBroadcast(sessionId, newAlias, outputMessage).catch((e) =>
                   log.error(LOG.TOOL, `Failed to pipe subagent output to caller`, {
                     error: String(e),
-                  }),
+                  })
                 );
               } else {
                 // Caller is still active - add to inbox for next synthetic injection
@@ -417,7 +445,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
               resumeWithSubagentOutput(sessionId, newAlias, subagentOutput).catch((e) =>
                 log.error(LOG.TOOL, `Failed to store subagent output for user message`, {
                   error: String(e),
-                }),
+                })
               );
             }
 
@@ -435,7 +463,7 @@ export function createSubagentTool(client: OpenCodeSessionClient) {
                 (e) =>
                   log.error(LOG.SESSION, `Failed to resume subagent session`, {
                     error: String(e),
-                  }),
+                  })
               );
             }
           })

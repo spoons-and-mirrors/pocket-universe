@@ -14,6 +14,9 @@ import { render } from './render';
 
 export const SUBAGENT_DESCRIPTION = `Spawn a new sibling agent to work on a task in parallel. The new agent joins the IAM network and can communicate via broadcast. Returns immediately (fire-and-forget).`;
 
+const SUBAGENT_UNKNOWN_TYPE_TEMPLATE =
+  'Error: Unknown subagent_type "{{subagentType}}". Available types: {{available}}.';
+
 const SUBAGENT_RESULT_TEMPLATE = `Spawned {{alias}} (session: {{sessionId}})
 Task: {{description}}
 The agent is now running in parallel and can be reached via broadcast.`;
@@ -48,7 +51,7 @@ export const SUBAGENT_CREATE_FAILED = `Error: Failed to create session. No sessi
 export function subagentResult(
   subagentAlias: string,
   sessionId: string,
-  description: string,
+  description: string
 ): string {
   return render(SUBAGENT_RESULT_TEMPLATE, {
     alias: subagentAlias,
@@ -66,6 +69,13 @@ export function subagentMaxDepth(depth: number, maxDepth: number): string {
 
 export function subagentError(error: string): string {
   return render(SUBAGENT_ERROR_TEMPLATE, { error });
+}
+
+export function subagentUnknownType(subagentType: string, availableTypes: string[]): string {
+  return render(SUBAGENT_UNKNOWN_TYPE_TEMPLATE, {
+    subagentType,
+    available: availableTypes.length > 0 ? availableTypes.join(', ') : 'none',
+  });
 }
 
 export function formatSubagentOutput(alias: string, output: string): string {

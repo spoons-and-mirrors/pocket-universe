@@ -37,7 +37,7 @@ import {
 function parseTemplate(
   template: string,
   conditions: Record<string, boolean>,
-  substitutions?: Record<string, string>,
+  substitutions?: Record<string, string>
 ): string {
   let result = template;
 
@@ -115,9 +115,15 @@ Each agent operates in its own isolated git worktree - a clean checkout from the
 
 {{subagent}}
 ## Spawning Agents
-- \`subagent(prompt="...", description="...")\` → create a sibling agent
+- \`subagent(prompt="...", description="...", subagent_type="...")\` → create a sibling agent
+- Omitting \`subagent_type\` defaults to your current agent type
 - **Fire-and-forget**: subagent() returns immediately, you continue working
 - **Output piping**: When subagent completes, its output arrives as a message
+{{subagent_types}}
+
+Available agent types:
+{{SUBAGENT_TYPES_LIST}}
+{{subagent_types}}
 {{worktree}}
 - Subagents get their own isolated worktrees
 {{worktree}}
@@ -156,6 +162,8 @@ export interface SystemPromptOptions {
   worktreePath?: string;
   /** Whether max subagent depth has been reached */
   maxDepthReached?: boolean;
+  /** Available subagent types from /agent endpoint */
+  subagentTypes?: Array<{ name: string; description?: string }>;
 }
 
 /**
@@ -163,6 +171,7 @@ export interface SystemPromptOptions {
  */
 export function getSystemPrompt(options?: SystemPromptOptions): string {
   const worktreeEnabled = isWorktreeEnabled();
+  const hasSubagentTypes = !!(options?.subagentTypes && options.subagentTypes.length > 0);
 
   const conditions = {
     broadcast: isBroadcastEnabled(),
@@ -170,11 +179,17 @@ export function getSystemPrompt(options?: SystemPromptOptions): string {
     subagent: isSubagentEnabled() && !options?.maxDepthReached,
     recall: isRecallEnabled(),
     max_depth_reached: !!options?.maxDepthReached,
+    subagent_types: hasSubagentTypes,
   };
 
   const substitutions: Record<string, string> = {};
   if (options?.worktreePath) {
     substitutions.WORKTREE_PATH = options.worktreePath;
+  }
+  if (hasSubagentTypes && options?.subagentTypes) {
+    substitutions.SUBAGENT_TYPES_LIST = options.subagentTypes
+      .map((t) => `- **${t.name}**${t.description ? `: ${t.description}` : ''}`)
+      .join('\n');
   }
 
   return parseTemplate(SYSTEM_PROMPT_TEMPLATE, conditions, substitutions);

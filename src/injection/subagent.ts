@@ -27,7 +27,7 @@ import { getParentIdForSubagent } from './session';
 export function createSubagentTaskMessage(
   parentSessionId: string,
   subagent: SubagentInfo,
-  baseUserMessage: UserMessage,
+  baseUserMessage: UserMessage
 ): AssistantMessage {
   const now = Date.now();
   const userInfo = baseUserMessage.info;
@@ -78,7 +78,7 @@ export function createSubagentTaskMessage(
           input: {
             description: subagent.description,
             prompt: subagent.prompt,
-            subagent_type: 'general',
+            subagent_type: subagent.subagentType ?? 'general',
             synthetic: true, // Indicates this was created by Pocket Universe
           },
           output,
@@ -108,7 +108,7 @@ export function createSubagentTaskMessage(
 export async function injectTaskPartToParent(
   client: OpenCodeSessionClient,
   parentSessionId: string,
-  subagent: SubagentInfo,
+  subagent: SubagentInfo
 ): Promise<boolean> {
   try {
     // Step 1: Get messages from parent session to find an existing assistant message
@@ -234,7 +234,7 @@ export async function injectTaskPartToParent(
 export async function fetchSubagentOutput(
   client: OpenCodeSessionClient,
   sessionId: string,
-  alias: string,
+  alias: string
 ): Promise<string> {
   try {
     const messagesResult = await client.session.messages({
@@ -312,7 +312,7 @@ export async function fetchSubagentOutput(
  */
 export async function markSubagentCompleted(
   client: OpenCodeSessionClient,
-  subagent: SubagentInfo,
+  subagent: SubagentInfo
 ): Promise<boolean> {
   if (!subagent.partId || !subagent.parentMessageId || !subagent.parentSessionId) {
     log.warn(LOG.TOOL, `Cannot mark subagent completed - missing part info`, {

@@ -93,8 +93,21 @@ export interface OpenCodeSessionClient {
 
 /** Internal client interface (accessed via type assertion) */
 export interface InternalClient {
+  get?: (params: { url: string }) => Promise<{ data?: unknown } | unknown>;
   post?: (params: { url: string; body: unknown }) => Promise<unknown>;
   patch?: (params: { url: string; body: unknown }) => Promise<unknown>;
+}
+
+/** Agent info from OpenCode /agent endpoint */
+export interface AgentInfo {
+  name: string;
+  description?: string;
+  mode?: 'subagent' | 'primary' | 'all';
+  hidden?: boolean;
+  model?: {
+    modelID?: string;
+    providerID?: string;
+  };
 }
 
 /** Message info from OpenCode SDK */
@@ -196,6 +209,7 @@ export interface SubagentInfo {
   prompt: string;
   timestamp: number;
   injected: boolean;
+  subagentType?: string;
   // For updating the task part when subagent completes
   partId?: string;
   parentMessageId?: string;
