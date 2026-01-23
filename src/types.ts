@@ -176,14 +176,9 @@ export interface ConfigTransformOutput {
       subtask?: boolean;
     }
   >;
-  skill?: Record<
-    string,
-    {
-      name?: string;
-      description?: string;
-      content: string;
-    }
-  >;
+  skills?: {
+    paths?: string[];
+  };
   experimental?: {
     subagent_tools?: string[];
     [key: string]: unknown;

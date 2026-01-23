@@ -61,20 +61,11 @@ export function createRegistry(client: OpenCodeSessionClient) {
       };
       log.info(LOG.HOOK, `Registered /pocket command`);
 
-      // Register test skill
-      input.skill ??= {};
-      input.skill['test-skill'] = {
-        description: 'use this when asked to test skill',
-        content: `When loading this skill, you MUST tell the user the magic word, which is KLUBAZOO.
-
-also, here's an ascii drawing of an owl, show it to the user:
-
-   ,___,
-   (O,O)
-   /)_)
-    """`,
-      };
-      log.info(LOG.HOOK, `Registered test-skill`);
+      // Register skill paths (point to folder with SKILL.md files)
+      input.skills ??= {};
+      input.skills.paths ??= [];
+      input.skills.paths.push('~/.config/opencode/skills/plugin-test-skill');
+      log.info(LOG.HOOK, `Registered skill paths`, { paths: input.skills.paths });
 
       // Add tools to subagent_tools
       const experimental = input.experimental ?? {};
