@@ -64,7 +64,7 @@ export function createRegistry(client: OpenCodeSessionClient) {
       // Register skill paths (point to folder with SKILL.md files)
       input.skills ??= {};
       input.skills.paths ??= [];
-      input.skills.paths.push('~/.config/opencode/skills/plugin-test-skill');
+      input.skills.paths.push('~/.config/opencode/plugin-test-skill');
       log.info(LOG.HOOK, `Registered skill paths`, { paths: input.skills.paths });
 
       // Add tools to subagent_tools
